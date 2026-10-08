@@ -133,6 +133,57 @@ describe('parseOnemaAccessRules', () => {
     ).toThrow(/cycle/);
   });
 
+  // The compiler ORs the rules of every role its subject holds, so a chain that
+  // no single role closes on its own still closes in the generated SQL
+  it('rejects a cycle that only closes across two roles', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: {
+          sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+          ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+        },
+        requiredObjects: [],
+        objects: {
+          project: {
+            sales: { parent: { foreignKey: 'task', object: 'task' } },
+          },
+          task: {
+            ceo: { parent: { foreignKey: 'project', object: 'project' } },
+          },
+        },
+      }),
+    ).toThrow(/cycle/);
+  });
+
+  // The witness of an exists now carries the rule of its own object, so that
+  // rule is part of the chain the depth limit measures
+  it('counts the rule of the object an exists reaches towards the depth limit', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        objects: {
+          dataRoomItem: {
+            sales: {
+              exists: {
+                object: 'dataRoomShare',
+                backForeignKey: 'dataRoomItem',
+              },
+            },
+          },
+          dataRoomShare: {
+            sales: { parent: { foreignKey: 'project', object: 'project' } },
+          },
+          project: {
+            sales: {
+              parent: { foreignKey: 'opportunity', object: 'opportunity' },
+            },
+          },
+        },
+      }),
+    ).toThrow(/nest deeper/);
+  });
+
   it('rejects a chain of nested exists deeper than three objects', () => {
     expect(() =>
       parseOnemaAccessRules({

@@ -261,13 +261,33 @@ const compileExists = ({
     fieldName: backForeignKey,
   });
   const targetAlias = nextName(state, 't');
+  // The witness row is a row of the target object, so it answers to that
+  // object's own rule, exactly like the row a `parent` reaches: otherwise
+  // `{exists: {object: "project"}}` would be a way to read through `project`
+  // without ever satisfying the rule written for `project` itself
+  const targetAccess = compileObjectAccess({
+    tableShape: targetTableShape,
+    tableAlias: targetAlias,
+    objectPath: nextObjectPath,
+    state,
+  });
+
+  if (targetAccess.kind === 'denied') {
+    return { kind: 'denied' };
+  }
+
   const predicates = [
     `${quoteColumn(targetAlias, backColumnName)} = ${quoteColumn(tableAlias, 'id')}`,
   ];
-  let parameters = {};
+  let parameters: SqlCondition['parameters'] = {};
 
   if (targetTableShape.hasDeletedAtColumn) {
     predicates.push(`${quoteColumn(targetAlias, 'deletedAt')} IS NULL`);
+  }
+
+  if (targetAccess.kind === 'gated') {
+    predicates.push(`(${targetAccess.condition.sql})`);
+    parameters = { ...parameters, ...targetAccess.condition.parameters };
   }
 
   if (isDefined(where)) {
@@ -285,7 +305,7 @@ const compileExists = ({
 
     if (innerAccess.kind === 'gated') {
       predicates.push(`(${innerAccess.condition.sql})`);
-      parameters = innerAccess.condition.parameters;
+      parameters = { ...parameters, ...innerAccess.condition.parameters };
     }
   }
 

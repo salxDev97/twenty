@@ -120,7 +120,6 @@ const validateObjectChains = (rules: OnemaAccessRules): void => {
 
       walkCondition({
         condition,
-        roleKey,
         rules,
         objectPath: [objectName],
         budget: { remainingConditions: ONEMA_MAX_CONDITIONS_PER_RULE },
@@ -132,16 +131,48 @@ const validateObjectChains = (rules: OnemaAccessRules): void => {
 
 type ConditionBudget = { remainingConditions: number };
 
+// A reached object brings in the conditions of *every* role, not of the role
+// the walk started from: the compiler ORs the rules of all the roles its
+// subject holds (compile-onema-row-access.util.ts), so a cycle A(role x) →
+// B(role y) → A is a real cycle in the SQL even though no single role closes
+// it. Walking one role at a time would let it through here and turn it into a
+// silent `denied` at compile time instead of a loud refusal at load time.
+const walkObject = ({
+  objectName,
+  rules,
+  objectPath,
+  budget,
+  describeRule,
+}: {
+  objectName: string;
+  rules: OnemaAccessRules;
+  objectPath: string[];
+  budget: ConditionBudget;
+  describeRule: string;
+}): void => {
+  const conditionByRoleKey = rules.objects[objectName];
+
+  if (!isDefined(conditionByRoleKey)) {
+    return;
+  }
+
+  for (const condition of Object.values(conditionByRoleKey)) {
+    if (!isDefined(condition)) {
+      continue;
+    }
+
+    walkCondition({ condition, rules, objectPath, budget, describeRule });
+  }
+};
+
 const walkCondition = ({
   condition,
-  roleKey,
   rules,
   objectPath,
   budget,
   describeRule,
 }: {
   condition: OnemaCondition;
-  roleKey: string;
   rules: OnemaAccessRules;
   objectPath: string[];
   budget: ConditionBudget;
@@ -162,7 +193,6 @@ const walkCondition = ({
     for (const operand of operands) {
       walkCondition({
         condition: operand,
-        roleKey,
         rules,
         objectPath,
         budget,
@@ -175,18 +205,26 @@ const walkCondition = ({
 
   // The target of an exists is one more object on the chain, like the target of
   // a parent: a chain of nested exists, or a mixed exists → parent → exists one,
-  // has to answer to the same depth and cycle limits
+  // has to answer to the same depth and cycle limits — and, since the compiler
+  // makes the witness row obey its own object's rule, to that rule too
   if ('exists' in condition) {
     const nextObjectPath = enterObject({
       objectName: condition.exists.object,
-      roleKey,
       objectPath,
+      describeRule,
+    });
+
+    walkObject({
+      objectName: condition.exists.object,
+      rules,
+      objectPath: nextObjectPath,
+      budget,
+      describeRule,
     });
 
     if (isDefined(condition.exists.where)) {
       walkCondition({
         condition: condition.exists.where,
-        roleKey,
         rules,
         objectPath: nextObjectPath,
         budget,
@@ -198,21 +236,14 @@ const walkCondition = ({
   }
 
   if ('parent' in condition) {
-    const parentObjectName = condition.parent.object;
     const nextObjectPath = enterObject({
-      objectName: parentObjectName,
-      roleKey,
+      objectName: condition.parent.object,
       objectPath,
+      describeRule,
     });
-    const parentCondition = rules.objects[parentObjectName]?.[roleKey];
 
-    if (!isDefined(parentCondition)) {
-      return;
-    }
-
-    walkCondition({
-      condition: parentCondition,
-      roleKey,
+    walkObject({
+      objectName: condition.parent.object,
       rules,
       objectPath: nextObjectPath,
       budget,
@@ -223,16 +254,16 @@ const walkCondition = ({
 
 const enterObject = ({
   objectName,
-  roleKey,
   objectPath,
+  describeRule,
 }: {
   objectName: string;
-  roleKey: string;
   objectPath: string[];
+  describeRule: string;
 }): string[] => {
   if (objectPath.includes(objectName)) {
     throw new OnemaAccessException(
-      `Onema access rules form a cycle for role "${roleKey}": ${[
+      `Onema access rules form a cycle reachable from object ${describeRule}: ${[
         ...objectPath,
         objectName,
       ].join(' -> ')}`,
@@ -244,7 +275,7 @@ const enterObject = ({
 
   if (nextObjectPath.length > ONEMA_MAX_RULE_DEPTH) {
     throw new OnemaAccessException(
-      `Onema access rules nest deeper than ${ONEMA_MAX_RULE_DEPTH} objects for role "${roleKey}": ${nextObjectPath.join(
+      `Onema access rules nest deeper than ${ONEMA_MAX_RULE_DEPTH} objects from object ${describeRule}: ${nextObjectPath.join(
         ' -> ',
       )}`,
       OnemaAccessExceptionCode.INVALID_RULES,

@@ -32,6 +32,7 @@ const projectTableShape = buildTestTableShape({
 });
 const projectMemberTableShape = buildTestTableShape({
   nameSingular: 'projectMember',
+  columnNames: ['isActive'],
   joinColumnNameByFieldName: { project: 'projectId', member: 'memberId' },
 });
 const taskTableShape = buildTestTableShape({
@@ -385,6 +386,86 @@ describe('compileOnemaRowAccess', () => {
         Object.keys(first.condition.parameters)[0] !==
           Object.keys(second.condition.parameters)[0],
     ).toBe(true);
+  });
+
+  // Without this, a rule could name as its witness an object the role is not
+  // allowed to read and borrow the rows it cannot see directly
+  it('makes the witness of an exists obey the rule of its own object', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          projectMember: { contractor: { eq: ['member', '$me'] } },
+          project: {
+            contractor: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: { eq: ['isActive', true] },
+              },
+            },
+          },
+        },
+      },
+      subject: {
+        workspaceMemberId: WORKSPACE_MEMBER_ID,
+        roleUniversalIdentifiers: [CONTRACTOR_ROLE_UNIVERSAL_IDENTIFIER],
+      },
+    });
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: projectTableShape,
+        tableAlias: 'project',
+        context,
+      }),
+    ).toEqual({
+      kind: 'gated',
+      condition: {
+        sql:
+          'EXISTS (SELECT 1 FROM "workspace_test"."_projectMember" AS "onema_0_project_t0" ' +
+          'WHERE "onema_0_project_t0"."projectId" = "project"."id" ' +
+          'AND "onema_0_project_t0"."deletedAt" IS NULL ' +
+          'AND ("onema_0_project_t0"."memberId" = :onema_0_project_p1) ' +
+          'AND ("onema_0_project_t0"."isActive" = :onema_0_project_p2))',
+        parameters: {
+          onema_0_project_p1: WORKSPACE_MEMBER_ID,
+          onema_0_project_p2: true,
+        },
+      },
+    });
+  });
+
+  it('denies an exists whose target object is closed to the role', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          projectMember: { ceo: { all: true } },
+          project: {
+            contractor: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: { eq: ['member', '$me'] },
+              },
+            },
+          },
+        },
+      },
+      subject: {
+        workspaceMemberId: WORKSPACE_MEMBER_ID,
+        roleUniversalIdentifiers: [CONTRACTOR_ROLE_UNIVERSAL_IDENTIFIER],
+      },
+    });
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: projectTableShape,
+        tableAlias: 'project',
+        context,
+      }),
+    ).toEqual({ kind: 'denied' });
   });
 
   it('denies an exists chain that reaches past the depth limit', () => {
