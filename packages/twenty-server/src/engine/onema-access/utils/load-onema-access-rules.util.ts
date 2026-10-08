@@ -7,6 +7,7 @@ import { Logger } from '@nestjs/common';
 import { isNonEmptyString } from '@sniptt/guards';
 import { isDefined } from 'twenty-shared/utils';
 
+import { NodeEnvironment } from 'src/engine/core-modules/twenty-config/interfaces/node-environment.interface';
 import {
   ONEMA_ACCESS_ENFORCE_ENABLED_VALUE,
   ONEMA_ACCESS_ENFORCE_ENVIRONMENT_VARIABLE,
@@ -60,8 +61,22 @@ const getCache = (): OnemaAccessRulesCache => {
 // `globalThis` (nor even `process`) despite being the same OS process. The
 // filesystem is the one thing both sides actually share, so the testing
 // override rides on a file instead of the in-memory cache above.
-const getTestingOverridePath = (): string =>
-  path.join(os.tmpdir(), 'onema-access-rules.testing-override.json');
+//
+// Undefined outside NODE_ENV=test, so the bridge does not exist at all in a
+// deployment: a file in the temp directory must never outrank the configured
+// rules file, and nothing outside a test may write one. The name carries the
+// pid for the same reason — a path shared by every process on the host would
+// let one test run (or anything else writing there) set another run's rules.
+const getTestingOverridePath = (): string | undefined => {
+  if (process.env.NODE_ENV !== NodeEnvironment.TEST) {
+    return undefined;
+  }
+
+  return path.join(
+    os.tmpdir(),
+    `onema-access-rules.testing-override.${process.pid}.json`,
+  );
+};
 
 export const isOnemaAccessEnforced = (): boolean =>
   process.env[ONEMA_ACCESS_ENFORCE_ENVIRONMENT_VARIABLE] ===
@@ -73,7 +88,7 @@ export const getOnemaAccessRulesState = (): OnemaAccessRulesState => {
 
   // A test changes the rules between two assertions, so its override never
   // waits for the reload interval
-  if (fs.existsSync(overridePath)) {
+  if (isDefined(overridePath) && fs.existsSync(overridePath)) {
     return refresh({ cache, rulesPath: overridePath, isTestingOverride: true });
   }
 
@@ -140,11 +155,30 @@ export const setOnemaAccessRulesForTesting = (
   const cache = getCache();
   const overridePath = getTestingOverridePath();
 
+  // Refusing is the point: reached outside a test, this call would otherwise
+  // look like it installed rules that nothing will ever read
+  if (!isDefined(overridePath)) {
+    throw new OnemaAccessException(
+      `setOnemaAccessRulesForTesting is a test-only bridge, and NODE_ENV is "${process.env.NODE_ENV}"`,
+      OnemaAccessExceptionCode.INVALID_RULES,
+    );
+  }
+
   cache.state = { kind: 'absent' };
   cache.checkedAtMs = 0;
 
   if (isDefined(rules)) {
-    fs.writeFileSync(overridePath, JSON.stringify(rules));
+    // The file goes back through the schema, which demands the key a test has
+    // no reason to spell out: a test states what it is testing, and nothing of
+    // it is "required" in the sense the real file means
+    fs.writeFileSync(
+      overridePath,
+      JSON.stringify({
+        ...rules,
+        requiredObjects: rules.requiredObjects ?? [],
+      }),
+      { mode: 0o600 },
+    );
 
     return;
   }

@@ -37,6 +37,12 @@ export const onemaAccessRulesSchema = z.strictObject({
   // The value is a role universalIdentifier, which is a uuid for the roles
   // Twenty ships but a free-form string for the ones an application declares
   roles: z.record(z.string().min(1), z.string().min(1)),
+  // Objects that must carry a rule. An object missing from `objects` falls back
+  // to upstream object and field permissions, which is indistinguishable from
+  // "nobody has written its rule yet"; naming it here turns that silence into a
+  // refusal of the whole file. Mandatory, and `[]` is the way to say "none":
+  // a file that simply forgets the key would be the same silence one level up.
+  requiredObjects: z.array(z.string().min(1)),
   objects: z.record(
     z.string().min(1),
     z.record(z.string().min(1), onemaConditionSchema),

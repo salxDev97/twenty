@@ -29,6 +29,10 @@ export type OnemaAccessRules = {
   // Role key of the rules file to the universalIdentifier of the Twenty role:
   // stable across reinstalls and renames, unlike a role id or a UI label
   roles: Record<OnemaRoleKey, string>;
+  // Objects that must have a non-empty rule, or the file is refused whole.
+  // The schema makes the key mandatory in a file; optional here because rules
+  // built in memory (tests, the testing bridge) have no file to forget it in
+  requiredObjects?: string[];
   objects: Record<string, Partial<Record<OnemaRoleKey, OnemaCondition>>>;
 };
 

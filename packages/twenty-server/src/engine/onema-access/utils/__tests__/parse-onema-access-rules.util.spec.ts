@@ -11,6 +11,7 @@ describe('parseOnemaAccessRules', () => {
         ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
         sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
       },
+      requiredObjects: ['opportunity', 'task'],
       objects: {
         opportunity: {
           ceo: { all: true },
@@ -45,9 +46,49 @@ describe('parseOnemaAccessRules', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: { opportunity: { sales: { anyParent: { fks: ['leadId'] } } } },
       }),
     ).toThrow(OnemaAccessException);
+  });
+
+  it('rejects a file that does not say which objects are required', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(OnemaAccessException);
+  });
+
+  it('rejects a required object that has no rule at all', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: ['opportunity', 'project'],
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/"project" as required but declare no rule/);
+  });
+
+  it('rejects a required object whose rule names no role', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: ['project'],
+        objects: { project: {} },
+      }),
+    ).toThrow(/"project" as required but its rule names no role/);
+  });
+
+  it('leaves an object nobody required free to have no rule', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        objects: { project: {} },
+      }),
+    ).not.toThrow();
   });
 
   it('rejects two role keys pointing at one role', () => {
@@ -57,6 +98,7 @@ describe('parseOnemaAccessRules', () => {
           sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
           ceo: SALES_ROLE_UNIVERSAL_IDENTIFIER,
         },
+        requiredObjects: [],
         objects: {
           opportunity: { ceo: { all: true }, sales: { eq: ['owner', '$me'] } },
         },
@@ -68,6 +110,7 @@ describe('parseOnemaAccessRules', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: { opportunity: { projectManager: { all: true } } },
       }),
     ).toThrow(/without declaring its role id/);
@@ -77,6 +120,7 @@ describe('parseOnemaAccessRules', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: {
           project: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },
@@ -93,6 +137,7 @@ describe('parseOnemaAccessRules', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: {
           project: {
             sales: {
@@ -123,6 +168,7 @@ describe('parseOnemaAccessRules', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: {
           dataRoomItem: {
             sales: {
@@ -147,6 +193,7 @@ describe('parseOnemaAccessRules', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: {
           project: {
             sales: {
@@ -168,6 +215,7 @@ describe('parseOnemaAccessRules', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: {
           opportunity: {
             sales: {
@@ -185,6 +233,7 @@ describe('parseOnemaAccessRules', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: {
           dataRoomItem: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },

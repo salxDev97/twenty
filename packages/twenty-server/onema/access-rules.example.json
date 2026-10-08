@@ -9,6 +9,7 @@
     "contractor": "00000000-0000-4000-8000-000000000007",
     "client": "00000000-0000-4000-8000-000000000008"
   },
+  "requiredObjects": ["opportunity", "project", "task", "dataRoomItem"],
   "objects": {
     "opportunity": {
       "ceo": { "all": true },
@@ -42,15 +43,21 @@
       "ceo": { "all": true },
       "coo": { "all": true },
       "deliveryHead": { "all": true },
-      "projectManager": { "parent": { "foreignKey": "project", "object": "project" } },
+      "projectManager": {
+        "parent": { "foreignKey": "project", "object": "project" }
+      },
       "contractor": { "eq": ["assignee", "$me"] }
     },
     "dataRoomItem": {
       "ceo": { "all": true },
       "coo": { "all": true },
       "deliveryHead": { "all": true },
-      "projectManager": { "parent": { "foreignKey": "project", "object": "project" } },
-      "contractor": { "parent": { "foreignKey": "project", "object": "project" } },
+      "projectManager": {
+        "parent": { "foreignKey": "project", "object": "project" }
+      },
+      "contractor": {
+        "parent": { "foreignKey": "project", "object": "project" }
+      },
       "client": {
         "and": [
           { "eq": ["visibleToClient", true] },

@@ -41,6 +41,7 @@ const rules: OnemaAccessRules = {
     sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
     application: APPLICATION_ROLE_UNIVERSAL_IDENTIFIER,
   },
+  requiredObjects: ['opportunity'],
   objects: {
     opportunity: {
       sales: { eq: ['owner', '$me'] },
@@ -251,6 +252,42 @@ describe('applyOnemaRowAccess', () => {
     setOnemaAccessRulesForTesting({
       roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
       objects: { opportuntiy: { sales: { eq: ['owner', '$me'] } } },
+    });
+
+    const queryBuilderMock = buildQueryBuilderMock({ alias: 'opportunity' });
+
+    apply(queryBuilderMock);
+
+    expect(queryBuilderMock.addRowAccessCondition).toHaveBeenCalledWith(
+      '1=0',
+      {},
+    );
+  });
+
+  // An object the file declares required and then does not rule on is the same
+  // opening as a typo, one step earlier: nothing in the file says it was meant
+  it('closes the whole query when a required object has no rule', () => {
+    setOnemaAccessRulesForTesting({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      requiredObjects: ['opportunity', 'company'],
+      objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
+    });
+
+    const queryBuilderMock = buildQueryBuilderMock({ alias: 'opportunity' });
+
+    apply(queryBuilderMock);
+
+    expect(queryBuilderMock.addRowAccessCondition).toHaveBeenCalledWith(
+      '1=0',
+      {},
+    );
+  });
+
+  it('closes the whole query when a required object has an empty rule', () => {
+    setOnemaAccessRulesForTesting({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      requiredObjects: ['opportunity'],
+      objects: { opportunity: {} },
     });
 
     const queryBuilderMock = buildQueryBuilderMock({ alias: 'opportunity' });

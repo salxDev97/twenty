@@ -32,9 +32,35 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
 
   validateRoleIdentifiersAreUnique(rules);
   validateRoleKeysAreDeclared(rules);
+  validateRequiredObjectsHaveRules(rules);
   validateObjectChains(rules);
 
   return rules;
+};
+
+// The two ways a listed object can end up with no usable rule, both of which
+// look like an unfinished edit rather than a decision: no entry in `objects`
+// (upstream permissions only — the object stays open) and an entry naming no
+// role at all. Either one refuses the file, so the deployment closes every
+// record instead of serving half a policy.
+const validateRequiredObjectsHaveRules = (rules: OnemaAccessRules): void => {
+  for (const objectName of rules.requiredObjects ?? []) {
+    const conditionByRoleKey = rules.objects[objectName];
+
+    if (!isDefined(conditionByRoleKey)) {
+      throw new OnemaAccessException(
+        `Onema access rules list "${objectName}" as required but declare no rule for it: the object would keep upstream permissions only`,
+        OnemaAccessExceptionCode.INVALID_RULES,
+      );
+    }
+
+    if (Object.values(conditionByRoleKey).filter(isDefined).length === 0) {
+      throw new OnemaAccessException(
+        `Onema access rules list "${objectName}" as required but its rule names no role`,
+        OnemaAccessExceptionCode.INVALID_RULES,
+      );
+    }
+  }
 };
 
 // Two role keys pointing at one role would hand the holder the union of both

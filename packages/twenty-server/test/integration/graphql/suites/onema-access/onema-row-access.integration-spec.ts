@@ -366,6 +366,19 @@ describe('onemaRowAccess', () => {
     expect(await countCompanies()).toBe(0);
   });
 
+  // The file refuses as a whole, so even an object it never mentions — which
+  // would otherwise keep upstream permissions — stops returning rows
+  it('hides every record when a required object has no rule', async () => {
+    setOnemaAccessRulesForTesting({
+      roles: { member: memberRoleUniversalIdentifier },
+      requiredObjects: ['company', 'opportunity'],
+      objects: { company: { member: { all: true } } },
+    });
+
+    expect(await findCompanies()).toEqual([]);
+    expect(await findPeople()).toEqual([]);
+  });
+
   it('hides every record when the rules name an object this workspace lacks', async () => {
     setOnemaAccessRulesForTesting({
       roles: { member: memberRoleUniversalIdentifier },

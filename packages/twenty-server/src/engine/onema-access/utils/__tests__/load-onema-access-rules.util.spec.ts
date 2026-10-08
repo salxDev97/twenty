@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { NodeEnvironment } from 'src/engine/core-modules/twenty-config/interfaces/node-environment.interface';
 import {
   ONEMA_ACCESS_ENFORCE_ENABLED_VALUE,
   ONEMA_ACCESS_ENFORCE_ENVIRONMENT_VARIABLE,
@@ -9,6 +10,7 @@ import {
   ONEMA_ACCESS_RULES_RELOAD_INTERVAL_MS,
 } from 'src/engine/onema-access/constants/onema-access.constants';
 import { OnemaAccessException } from 'src/engine/onema-access/exceptions/onema-access.exception';
+import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
 import {
   getOnemaAccessRulesState,
   isOnemaAccessEnforced,
@@ -18,8 +20,9 @@ import {
 
 const SALES_ROLE_UNIVERSAL_IDENTIFIER = '00000000-0000-4000-8000-000000000005';
 
-const validRules = {
+const validRules: OnemaAccessRules = {
   roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+  requiredObjects: [],
   objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
 };
 
@@ -37,6 +40,7 @@ describe('getOnemaAccessRulesState', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    process.env.NODE_ENV = NodeEnvironment.TEST;
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });
     setOnemaAccessRulesForTesting(undefined);
     delete process.env[ONEMA_ACCESS_RULES_PATH_ENVIRONMENT_VARIABLE];
@@ -97,6 +101,7 @@ describe('getOnemaAccessRulesState', () => {
       rulesPath,
       JSON.stringify({
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
         objects: { opportunity: {} },
       }),
     );
@@ -131,6 +136,78 @@ describe('getOnemaAccessRulesState', () => {
     );
 
     expect(getOnemaAccessRulesState().kind).toBe('failed');
+  });
+
+  it('serves the testing override ahead of the configured file while testing', () => {
+    process.env[ONEMA_ACCESS_RULES_PATH_ENVIRONMENT_VARIABLE] = writeRulesFile(
+      JSON.stringify(validRules),
+    );
+
+    setOnemaAccessRulesForTesting({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+    });
+
+    const state = getOnemaAccessRulesState();
+
+    expect(state.kind === 'loaded' && state.isTestingOverride).toBe(true);
+    expect(
+      state.kind === 'loaded' && state.rules.objects.project,
+    ).toBeDefined();
+  });
+
+  it('ignores a leftover testing override outside the test environment', () => {
+    setOnemaAccessRulesForTesting({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+    });
+
+    process.env[ONEMA_ACCESS_RULES_PATH_ENVIRONMENT_VARIABLE] = writeRulesFile(
+      JSON.stringify(validRules),
+    );
+    process.env.NODE_ENV = NodeEnvironment.PRODUCTION;
+
+    const state = getOnemaAccessRulesState();
+
+    expect(state.kind === 'loaded' && state.isTestingOverride).toBe(false);
+    expect(state.kind === 'loaded' && state.rules).toEqual(validRules);
+  });
+
+  it('serves no rules at all outside the test environment when only the override exists', () => {
+    setOnemaAccessRulesForTesting({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+    });
+
+    process.env.NODE_ENV = NodeEnvironment.PRODUCTION;
+
+    expect(getOnemaAccessRulesState()).toEqual({ kind: 'absent' });
+  });
+
+  it('writes the testing override to a path of its own process', () => {
+    setOnemaAccessRulesForTesting(validRules);
+
+    expect(
+      fs.existsSync(
+        path.join(
+          os.tmpdir(),
+          `onema-access-rules.testing-override.${process.pid}.json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(os.tmpdir(), 'onema-access-rules.testing-override.json'),
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses to install a testing override outside the test environment', () => {
+    process.env.NODE_ENV = NodeEnvironment.PRODUCTION;
+
+    expect(() => setOnemaAccessRulesForTesting(validRules)).toThrow(
+      OnemaAccessException,
+    );
   });
 
   it('parses the example rules file shipped with the fork', () => {
