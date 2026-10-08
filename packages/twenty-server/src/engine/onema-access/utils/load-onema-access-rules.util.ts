@@ -12,37 +12,59 @@ import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-acces
 import { parseOnemaAccessRules } from 'src/engine/onema-access/utils/parse-onema-access-rules.util';
 
 // The repository is built per request from a plain options object, not from the
-// Nest container, so the rules live in a module-level cache instead of a provider
-let cachedRules: OnemaAccessRules | undefined;
-let areRulesLoaded = false;
+// Nest container, so the rules live in a cache instead of a provider. The cache
+// hangs off the global symbol registry, not off this module: integration tests
+// boot the application in one module registry and drive it from another, and
+// both must see the same rules.
+type OnemaAccessRulesCache = {
+  rules: OnemaAccessRules | undefined;
+  areRulesLoaded: boolean;
+};
+
+const ONEMA_ACCESS_RULES_CACHE_KEY = Symbol.for('onema.accessRulesCache');
+
+const getCache = (): OnemaAccessRulesCache => {
+  const globalScope = globalThis as unknown as Record<symbol, unknown>;
+
+  globalScope[ONEMA_ACCESS_RULES_CACHE_KEY] ??= {
+    rules: undefined,
+    areRulesLoaded: false,
+  } satisfies OnemaAccessRulesCache;
+
+  return globalScope[ONEMA_ACCESS_RULES_CACHE_KEY] as OnemaAccessRulesCache;
+};
 
 export const loadOnemaAccessRules = (): OnemaAccessRules | undefined => {
-  if (areRulesLoaded) {
-    return cachedRules;
+  const cache = getCache();
+
+  if (cache.areRulesLoaded) {
+    return cache.rules;
   }
 
   const rulesPath =
     process.env[ONEMA_ACCESS_RULES_PATH_ENVIRONMENT_VARIABLE] ?? '';
 
   if (!isNonEmptyString(rulesPath)) {
-    areRulesLoaded = true;
-    cachedRules = undefined;
+    cache.rules = undefined;
+    cache.areRulesLoaded = true;
 
     return undefined;
   }
 
-  cachedRules = parseOnemaAccessRules(readRulesFile(rulesPath));
-  areRulesLoaded = true;
+  cache.rules = parseOnemaAccessRules(readRulesFile(rulesPath));
+  cache.areRulesLoaded = true;
 
-  return cachedRules;
+  return cache.rules;
 };
 
 // Passing undefined clears the cache, so the next load reads the environment again
 export const setOnemaAccessRulesForTesting = (
   rules: OnemaAccessRules | undefined,
 ): void => {
-  cachedRules = rules;
-  areRulesLoaded = isDefined(rules);
+  const cache = getCache();
+
+  cache.rules = rules;
+  cache.areRulesLoaded = isDefined(rules);
 };
 
 const readRulesFile = (rulesPath: string): unknown => {
