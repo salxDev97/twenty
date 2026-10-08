@@ -439,6 +439,143 @@ describe('parseOnemaAccessRules', () => {
     ).toThrow(/nest deeper/);
   });
 
+  it('accepts a polymorphic chain one object deeper than a plain one', () => {
+    const rules = {
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      freezeWhen: {},
+      objects: {
+        attachment: {
+          sales: {
+            anyParent: {
+              parents: [{ foreignKey: 'targetPerson', object: 'person' }],
+            },
+          },
+        },
+        person: {
+          sales: { parent: { foreignKey: 'company', object: 'company' } },
+        },
+        company: {
+          sales: {
+            parent: { foreignKey: 'opportunity', object: 'opportunity' },
+          },
+        },
+        opportunity: { sales: { eq: ['owner', '$me'] } },
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  it('rejects a polymorphic chain that reaches a fifth object', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {},
+        objects: {
+          attachment: {
+            sales: {
+              anyParent: {
+                parents: [{ foreignKey: 'targetNote', object: 'note' }],
+              },
+            },
+          },
+          note: {
+            sales: { parent: { foreignKey: 'person', object: 'person' } },
+          },
+          person: {
+            sales: { parent: { foreignKey: 'company', object: 'company' } },
+          },
+          company: {
+            sales: {
+              parent: { foreignKey: 'opportunity', object: 'opportunity' },
+            },
+          },
+          opportunity: { sales: { eq: ['owner', '$me'] } },
+        },
+      }),
+    ).toThrow(/nest deeper/);
+  });
+
+  // The branches of a polymorphic condition are alternatives joined by OR, so
+  // one target without a rule of its own opens every record hanging off it
+  it('rejects an anyParent target the file declares no rule for', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {},
+        objects: {
+          attachment: {
+            sales: {
+              anyParent: {
+                parents: [
+                  { foreignKey: 'targetOpportunity', object: 'opportunity' },
+                  { foreignKey: 'targetDashboard', object: 'dashboard' },
+                ],
+              },
+            },
+          },
+          opportunity: { sales: { eq: ['owner', '$me'] } },
+        },
+      }),
+    ).toThrow(/"dashboard" through a polymorphic target/);
+  });
+
+  it('rejects a linked object the file declares no rule for', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {},
+        objects: {
+          timelineActivity: {
+            sales: {
+              linked: {
+                objectIdField: 'linkedObjectMetadataId',
+                recordIdField: 'linkedRecordId',
+                objects: ['opportunity', 'workflow'],
+              },
+            },
+          },
+          opportunity: { sales: { eq: ['owner', '$me'] } },
+        },
+      }),
+    ).toThrow(/"workflow" through a polymorphic target/);
+  });
+
+  it('rejects a cycle a polymorphic target closes', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {},
+        objects: {
+          note: {
+            sales: {
+              anyParent: {
+                parents: [{ foreignKey: 'targetTask', object: 'task' }],
+              },
+            },
+          },
+          task: {
+            sales: {
+              anyParent: {
+                parents: [{ foreignKey: 'targetNote', object: 'note' }],
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(/cycle/);
+  });
+
   it('accepts protected fields and a freeze rule', () => {
     const rules = {
       application: 'onema-application',

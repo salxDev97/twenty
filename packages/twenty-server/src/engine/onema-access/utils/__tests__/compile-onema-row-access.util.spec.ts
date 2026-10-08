@@ -44,6 +44,31 @@ const taskTableShape = buildTestTableShape({
   columnNames: ['isUrgent'],
   joinColumnNameByFieldName: { project: 'projectId' },
 });
+const companyTableShape = buildTestTableShape({
+  nameSingular: 'company',
+  joinColumnNameByFieldName: { parentOpportunity: 'parentOpportunityId' },
+});
+const personTableShape = buildTestTableShape({
+  nameSingular: 'person',
+  joinColumnNameByFieldName: { company: 'companyId' },
+});
+const attachmentTableShape = buildTestTableShape({
+  nameSingular: 'attachment',
+  joinColumnNameByFieldName: {
+    targetOpportunity: 'targetOpportunityId',
+    targetTask: 'targetTaskId',
+    targetPerson: 'targetPersonId',
+  },
+});
+const noteTableShape = buildTestTableShape({
+  nameSingular: 'note',
+  joinColumnNameByFieldName: { person: 'personId' },
+});
+const timelineActivityTableShape = buildTestTableShape({
+  nameSingular: 'timelineActivity',
+  columnNames: ['linkedObjectMetadataId', 'linkedRecordId'],
+  joinColumnNameByFieldName: { targetOpportunity: 'targetOpportunityId' },
+});
 
 const { objectIdByNameSingular, tableShapeByObjectMetadataId } =
   buildTestTableShapeRegistry([
@@ -51,6 +76,11 @@ const { objectIdByNameSingular, tableShapeByObjectMetadataId } =
     projectTableShape,
     projectMemberTableShape,
     taskTableShape,
+    companyTableShape,
+    personTableShape,
+    attachmentTableShape,
+    noteTableShape,
+    timelineActivityTableShape,
   ]);
 
 const buildContext = ({
@@ -507,6 +537,202 @@ describe('compileOnemaRowAccess', () => {
         tableShape: projectTableShape,
         tableAlias: 'project',
         context,
+      }),
+    ).toEqual({ kind: 'denied' });
+  });
+
+  it('compiles anyParent into one branch per target, each under the rule of its own parent', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          opportunity: { sales: { eq: ['owner', '$me'] } },
+          task: { sales: { all: true } },
+          attachment: {
+            sales: {
+              anyParent: {
+                parents: [
+                  { foreignKey: 'targetOpportunity', object: 'opportunity' },
+                  { foreignKey: 'targetTask', object: 'task' },
+                ],
+              },
+            },
+          },
+        },
+      },
+      subject: salesSubject,
+    });
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: attachmentTableShape,
+        tableAlias: 'attachment',
+        context,
+      }),
+    ).toEqual({
+      kind: 'gated',
+      condition: {
+        sql:
+          '((EXISTS (SELECT 1 FROM "workspace_test"."_opportunity" AS "onema_0_attachment_t0" ' +
+          'WHERE "onema_0_attachment_t0"."id" = "attachment"."targetOpportunityId" ' +
+          'AND "onema_0_attachment_t0"."deletedAt" IS NULL ' +
+          'AND ("onema_0_attachment_t0"."ownerId" = :onema_0_attachment_p1))) ' +
+          'OR (EXISTS (SELECT 1 FROM "workspace_test"."_task" AS "onema_0_attachment_t2" ' +
+          'WHERE "onema_0_attachment_t2"."id" = "attachment"."targetTaskId" ' +
+          'AND "onema_0_attachment_t2"."deletedAt" IS NULL)))',
+        parameters: { onema_0_attachment_p1: WORKSPACE_MEMBER_ID },
+      },
+    });
+  });
+
+  it('denies anyParent when no target carries a rule the role satisfies', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          opportunity: { ceo: { all: true } },
+          task: { ceo: { all: true } },
+          attachment: {
+            sales: {
+              anyParent: {
+                parents: [
+                  { foreignKey: 'targetOpportunity', object: 'opportunity' },
+                  { foreignKey: 'targetTask', object: 'task' },
+                ],
+              },
+            },
+          },
+        },
+      },
+      subject: salesSubject,
+    });
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: attachmentTableShape,
+        tableAlias: 'attachment',
+        context,
+      }),
+    ).toEqual({ kind: 'denied' });
+  });
+
+  it('compiles linked into one branch per object, pinned by its metadata id', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          opportunity: { sales: { eq: ['owner', '$me'] } },
+          timelineActivity: {
+            sales: {
+              linked: {
+                objectIdField: 'linkedObjectMetadataId',
+                recordIdField: 'linkedRecordId',
+                objects: ['opportunity'],
+              },
+            },
+          },
+        },
+      },
+      subject: salesSubject,
+    });
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: timelineActivityTableShape,
+        tableAlias: 'timelineActivity',
+        context,
+      }),
+    ).toEqual({
+      kind: 'gated',
+      condition: {
+        sql:
+          '("timelineActivity"."linkedObjectMetadataId" = :onema_0_timelineActivity_p2 ' +
+          'AND EXISTS (SELECT 1 FROM "workspace_test"."_opportunity" AS "onema_0_timelineActivity_t0" ' +
+          'WHERE "onema_0_timelineActivity_t0"."id" = "timelineActivity"."linkedRecordId" ' +
+          'AND "onema_0_timelineActivity_t0"."deletedAt" IS NULL ' +
+          'AND ("onema_0_timelineActivity_t0"."ownerId" = :onema_0_timelineActivity_p1)))',
+        parameters: {
+          onema_0_timelineActivity_p1: WORKSPACE_MEMBER_ID,
+          onema_0_timelineActivity_p2: opportunityTableShape.objectMetadataId,
+        },
+      },
+    });
+  });
+
+  it('denies linked when the role may see none of the objects it names', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          opportunity: { ceo: { all: true } },
+          timelineActivity: {
+            sales: {
+              linked: {
+                objectIdField: 'linkedObjectMetadataId',
+                recordIdField: 'linkedRecordId',
+                objects: ['opportunity'],
+              },
+            },
+          },
+        },
+      },
+      subject: salesSubject,
+    });
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: timelineActivityTableShape,
+        tableAlias: 'timelineActivity',
+        context,
+      }),
+    ).toEqual({ kind: 'denied' });
+  });
+
+  // The polymorphic hop is our own indirection, so the chain behind it gets one
+  // object more than a plain chain does. The contrast is the whole point: the
+  // same four objects reached by a plain parent are still refused.
+  it('lets a chain through a polymorphic target reach one object further', () => {
+    const rules = {
+      roles: baseRoles,
+      objects: {
+        opportunity: { sales: { eq: ['owner', '$me'] } },
+        company: {
+          sales: {
+            parent: {
+              foreignKey: 'parentOpportunity',
+              object: 'opportunity',
+            },
+          },
+        },
+        person: {
+          sales: { parent: { foreignKey: 'company', object: 'company' } },
+        },
+        attachment: {
+          sales: {
+            anyParent: {
+              parents: [{ foreignKey: 'targetPerson', object: 'person' }],
+            },
+          },
+        },
+        note: {
+          sales: { parent: { foreignKey: 'person', object: 'person' } },
+        },
+      },
+    };
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: attachmentTableShape,
+        tableAlias: 'attachment',
+        context: buildContext({ rules, subject: salesSubject }),
+      }).kind,
+    ).toBe('gated');
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: noteTableShape,
+        tableAlias: 'note',
+        context: buildContext({ rules, subject: salesSubject }),
       }),
     ).toEqual({ kind: 'denied' });
   });

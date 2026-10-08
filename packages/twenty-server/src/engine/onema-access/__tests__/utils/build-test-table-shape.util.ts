@@ -15,7 +15,9 @@ export const buildTestTableShape = ({
   columnNames?: string[];
   joinColumnNameByFieldName?: Record<string, string>;
   // Which object a relation points at, when it is not the one the field is
-  // named after — `accountOwner` points at `workspaceMember`
+  // named after — `accountOwner` points at `workspaceMember`, and a polymorphic
+  // field is named after the target slot rather than the object (`targetTask`
+  // → `task`)
   relationTargetByFieldName?: Record<string, string>;
   // A composite field is several columns, each naming the field it belongs to
   compositeParentFieldNameByColumnName?: Record<string, string>;

@@ -23,6 +23,20 @@ const taskTableShape = buildTestTableShape({
   nameSingular: 'task',
   joinColumnNameByFieldName: { project: 'projectId' },
 });
+const attachmentTableShape = buildTestTableShape({
+  nameSingular: 'attachment',
+  joinColumnNameByFieldName: {
+    targetTask: 'targetTaskId',
+    targetProject: 'targetProjectId',
+  },
+  relationTargetByFieldName: { targetTask: 'task', targetProject: 'project' },
+});
+const timelineActivityTableShape = buildTestTableShape({
+  nameSingular: 'timelineActivity',
+  columnNames: ['linkedObjectMetadataId', 'linkedRecordId'],
+  joinColumnNameByFieldName: { targetTask: 'targetTaskId' },
+  relationTargetByFieldName: { targetTask: 'task' },
+});
 
 const { objectIdByNameSingular, tableShapeByObjectMetadataId } =
   buildTestTableShapeRegistry([
@@ -30,6 +44,8 @@ const { objectIdByNameSingular, tableShapeByObjectMetadataId } =
     projectMemberTableShape,
     taskTableShape,
     workspaceMemberTableShape,
+    attachmentTableShape,
+    timelineActivityTableShape,
   ]);
 
 const metadata = {
@@ -141,6 +157,105 @@ describe('validateOnemaAccessRulesAgainstMetadata', () => {
 
     expect(validation.kind === 'invalid' && validation.problems.join()).toMatch(
       /"projectId" is no relation of "task"/,
+    );
+  });
+
+  it('accepts polymorphic targets and a linked pair that exist', () => {
+    expect(
+      validate({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: {
+          task: { sales: { all: true } },
+          project: { sales: { all: true } },
+          attachment: {
+            sales: {
+              anyParent: {
+                parents: [
+                  { foreignKey: 'targetTask', object: 'task' },
+                  { foreignKey: 'targetProject', object: 'project' },
+                ],
+              },
+            },
+          },
+          timelineActivity: {
+            sales: {
+              linked: {
+                objectIdField: 'linkedObjectMetadataId',
+                recordIdField: 'linkedRecordId',
+                objects: ['task'],
+              },
+            },
+          },
+        },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  it('rejects an anyParent target whose foreign key points elsewhere', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: {
+        project: { sales: { all: true } },
+        attachment: {
+          sales: {
+            anyParent: {
+              parents: [{ foreignKey: 'targetTask', object: 'project' }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(validation.kind === 'invalid' && validation.problems.join()).toMatch(
+      /anyParent\.foreignKey "targetTask" of "attachment" points at another object than "project"/,
+    );
+  });
+
+  // The two fields hold bare identifiers; a relation there would compile into a
+  // join column compared against an object metadata id and match nothing
+  it('rejects a linked field that is a relation rather than an identifier', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: {
+        task: { sales: { all: true } },
+        timelineActivity: {
+          sales: {
+            linked: {
+              objectIdField: 'targetTask',
+              recordIdField: 'linkedRecordId',
+              objects: ['task'],
+            },
+          },
+        },
+      },
+    });
+
+    expect(validation.kind === 'invalid' && validation.problems.join()).toMatch(
+      /"targetTask" of "timelineActivity" is a relation, not an identifier column/,
+    );
+  });
+
+  it('rejects a linked pair and an object this workspace does not have', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: {
+        timelineActivity: {
+          sales: {
+            linked: {
+              objectIdField: 'linkedObjectMetadatId',
+              recordIdField: 'linkedRecordId',
+              objects: ['tsak'],
+            },
+          },
+        },
+      },
+    });
+
+    expect(validation.kind === 'invalid' && validation.problems.join()).toMatch(
+      /"linkedObjectMetadatId" is no field of "timelineActivity"/,
+    );
+    expect(validation.kind === 'invalid' && validation.problems.join()).toMatch(
+      /linked names no object of this workspace \("tsak"\)/,
     );
   });
 
