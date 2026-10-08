@@ -26,6 +26,11 @@ const validRules: OnemaAccessRules = {
   objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
 };
 
+const testingOverridePath = path.join(
+  os.tmpdir(),
+  `onema-access-rules.testing-override.${process.pid}.json`,
+);
+
 describe('getOnemaAccessRulesState', () => {
   let temporaryDirectory: string;
 
@@ -53,6 +58,19 @@ describe('getOnemaAccessRulesState', () => {
     fs.writeFileSync(rulesPath, content);
 
     return rulesPath;
+  };
+
+  // Written straight to disk, not through setOnemaAccessRulesForTesting: that
+  // helper also clears the cache, which is exactly what the app process cannot
+  // do when the test driving it lives in another vm context
+  const writeTestingOverrideFile = (rules: OnemaAccessRules): void => {
+    fs.writeFileSync(
+      testingOverridePath,
+      JSON.stringify({
+        ...rules,
+        requiredObjects: rules.requiredObjects ?? [],
+      }),
+    );
   };
 
   const skipReloadInterval = (): void => {
@@ -154,6 +172,71 @@ describe('getOnemaAccessRulesState', () => {
     expect(
       state.kind === 'loaded' && state.rules.objects.project,
     ).toBeDefined();
+  });
+
+  // The bridge is consulted on every query of every suite of the repository,
+  // so an override nobody touched must not cost a read and a hash each time
+  it('does not re-read an unchanged testing override', () => {
+    writeTestingOverrideFile({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+    });
+
+    getOnemaAccessRulesState();
+
+    const readFileSyncSpy = jest.spyOn(fs, 'readFileSync');
+
+    getOnemaAccessRulesState();
+    getOnemaAccessRulesState();
+
+    expect(readFileSyncSpy).not.toHaveBeenCalled();
+  });
+
+  // The app and the test that drives it do not share the cache, only the file,
+  // so a swap has to be seen on the next query and not after the interval
+  it('picks up a testing override replaced in place at once', () => {
+    writeTestingOverrideFile({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+    });
+
+    expect(getOnemaAccessRulesState().kind).toBe('loaded');
+
+    writeTestingOverrideFile({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
+    });
+
+    const state = getOnemaAccessRulesState();
+
+    expect(
+      state.kind === 'loaded' && state.rules.objects.project,
+    ).toBeUndefined();
+    expect(
+      state.kind === 'loaded' && state.rules.objects.opportunity,
+    ).toBeDefined();
+  });
+
+  it('falls back to the configured file as soon as the override is removed', () => {
+    process.env[ONEMA_ACCESS_RULES_PATH_ENVIRONMENT_VARIABLE] = writeRulesFile(
+      JSON.stringify(validRules),
+    );
+
+    writeTestingOverrideFile({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+    });
+
+    expect(getOnemaAccessRulesState().kind).toBe('loaded');
+
+    // Removed behind the cache's back, the way the app process sees a test
+    // clearing its override from the other vm context
+    fs.rmSync(testingOverridePath);
+
+    const state = getOnemaAccessRulesState();
+
+    expect(state.kind === 'loaded' && state.isTestingOverride).toBe(false);
+    expect(state.kind === 'loaded' && state.rules).toEqual(validRules);
   });
 
   it('ignores a leftover testing override outside the test environment', () => {

@@ -41,6 +41,7 @@ export type OnemaAccessRulesState =
 type OnemaAccessRulesCache = {
   state: OnemaAccessRulesState;
   checkedAtMs: number;
+  testingOverrideSignature?: string;
 };
 
 const ONEMA_ACCESS_RULES_CACHE_KEY = Symbol.for('onema.accessRulesCache');
@@ -82,14 +83,56 @@ export const isOnemaAccessEnforced = (): boolean =>
   process.env[ONEMA_ACCESS_ENFORCE_ENVIRONMENT_VARIABLE] ===
   ONEMA_ACCESS_ENFORCE_ENABLED_VALUE;
 
+// Nanoseconds and size, not whole-millisecond mtime: a test that swaps the
+// override twice in a row must never be served the first version
+const readTestingOverrideSignature = (
+  overridePath: string,
+): string | undefined => {
+  const stats = fs.statSync(overridePath, {
+    bigint: true,
+    throwIfNoEntry: false,
+  });
+
+  return isDefined(stats) ? `${stats.mtimeNs}:${stats.size}` : undefined;
+};
+
 export const getOnemaAccessRulesState = (): OnemaAccessRulesState => {
   const cache = getCache();
   const overridePath = getTestingOverridePath();
 
-  // A test changes the rules between two assertions, so its override never
-  // waits for the reload interval
-  if (isDefined(overridePath) && fs.existsSync(overridePath)) {
-    return refresh({ cache, rulesPath: overridePath, isTestingOverride: true });
+  if (isDefined(overridePath)) {
+    // Every suite of the repository runs with NODE_ENV=test and almost none of
+    // them install an override, so this path pays one stat and nothing else
+    const signature = readTestingOverrideSignature(overridePath);
+
+    if (isDefined(signature)) {
+      // A test changes the rules between two assertions, so its override never
+      // waits for the reload interval — but an unchanged file is not re-read
+      // and re-hashed on every single query either
+      if (
+        cache.state.kind !== 'absent' &&
+        cache.state.isTestingOverride &&
+        cache.testingOverrideSignature === signature
+      ) {
+        return cache.state;
+      }
+
+      cache.testingOverrideSignature = signature;
+
+      return refresh({
+        cache,
+        rulesPath: overridePath,
+        isTestingOverride: true,
+      });
+    }
+
+    cache.testingOverrideSignature = undefined;
+
+    // The override is gone and the cache still holds what it said: the
+    // configured file has to be read back now, not after the reload interval
+    if (cache.state.kind !== 'absent' && cache.state.isTestingOverride) {
+      cache.checkedAtMs = 0;
+    }
   }
 
   const rulesPath =
