@@ -24,6 +24,8 @@ const validRules: OnemaAccessRules = {
   roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
   requiredObjects: [],
   objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
+  writeProtectedFields: {},
+  freezeWhen: {},
 };
 
 const testingOverridePath = path.join(
@@ -69,6 +71,8 @@ describe('getOnemaAccessRulesState', () => {
       JSON.stringify({
         ...rules,
         requiredObjects: rules.requiredObjects ?? [],
+        writeProtectedFields: rules.writeProtectedFields ?? {},
+        freezeWhen: rules.freezeWhen ?? {},
       }),
     );
   };
@@ -121,6 +125,8 @@ describe('getOnemaAccessRulesState', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         objects: { opportunity: {} },
+        writeProtectedFields: {},
+        freezeWhen: {},
       }),
     );
 

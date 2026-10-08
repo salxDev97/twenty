@@ -114,10 +114,13 @@ const apply = (
 ) =>
   applyOnemaRowAccess({
     queryBuilder: queryBuilderMock as unknown as WorkspaceSelectQueryBuilder,
-    tableShape: opportunityTableShape,
-    authContext,
-    internalContext,
-    tableShapeByObjectMetadataId,
+    scope: {
+      tableShape: opportunityTableShape,
+      authContext,
+      internalContext,
+      tableShapeByObjectMetadataId,
+      shouldBypassPermissionChecks: false,
+    },
   });
 
 describe('applyOnemaRowAccess', () => {

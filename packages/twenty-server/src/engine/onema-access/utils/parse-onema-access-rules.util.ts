@@ -34,8 +34,55 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
   validateRoleKeysAreDeclared(rules);
   validateRequiredObjectsHaveRules(rules);
   validateObjectChains(rules);
+  validateWriteProtectedFields(rules);
+  validateFreezeRules(rules);
 
   return rules;
+};
+
+// rls-design §12а Т-1: a protected field is one only our application writes, so
+// a file that names such a field without naming the application has described a
+// rule nothing can ever satisfy — and would quietly freeze the field for good
+const validateWriteProtectedFields = (rules: OnemaAccessRules): void => {
+  const fieldsByObjectName = Object.entries(rules.writeProtectedFields ?? {});
+
+  if (fieldsByObjectName.length > 0 && !isDefined(rules.application)) {
+    throw new OnemaAccessException(
+      'Onema access rules protect fields but declare no "application": nothing would ever be allowed to write them',
+      OnemaAccessExceptionCode.INVALID_RULES,
+    );
+  }
+
+  for (const [objectName, roleKeysByFieldName] of fieldsByObjectName) {
+    for (const [fieldName, roleKeys] of Object.entries(roleKeysByFieldName)) {
+      for (const roleKey of roleKeys) {
+        if (!isDefined(rules.roles[roleKey])) {
+          throw new OnemaAccessException(
+            `Onema access rules let role "${roleKey}" write protected field "${objectName}.${fieldName}" without declaring its role id`,
+            OnemaAccessExceptionCode.INVALID_RULES,
+          );
+        }
+      }
+    }
+  }
+};
+
+// rls-design §12а Т-2. Freezing the field the condition reads is allowed on
+// purpose — that is how a stage becomes final — and two rules may freeze one
+// field under two conditions; a field repeated inside one rule is a slip
+const validateFreezeRules = (rules: OnemaAccessRules): void => {
+  for (const [objectName, freezeRules] of Object.entries(
+    rules.freezeWhen ?? {},
+  )) {
+    for (const freezeRule of freezeRules) {
+      if (new Set(freezeRule.fields).size !== freezeRule.fields.length) {
+        throw new OnemaAccessException(
+          `Onema access rules freeze a field of "${objectName}" twice in one rule on "${freezeRule.field}"`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+    }
+  }
 };
 
 // The two ways a listed object can end up with no usable rule, both of which

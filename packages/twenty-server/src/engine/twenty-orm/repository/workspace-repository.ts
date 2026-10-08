@@ -25,7 +25,15 @@ import {
   PermissionsExceptionCode,
   PermissionsExceptionMessage,
 } from 'src/engine/metadata-modules/permissions/permissions.exception';
+import { applyOnemaOwnerDefaults } from 'src/engine/onema-access/utils/apply-onema-owner-defaults.util';
 import { applyOnemaRowAccess } from 'src/engine/onema-access/utils/apply-onema-row-access.util';
+import { assertOnemaFrozenFieldsAreUnchanged } from 'src/engine/onema-access/utils/assert-onema-frozen-fields-are-unchanged.util';
+import { assertOnemaProtectedFieldsAreWritable } from 'src/engine/onema-access/utils/assert-onema-protected-fields-are-writable.util';
+import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
+import {
+  isOnemaAccessPossiblyActive,
+  type OnemaAccessScope,
+} from 'src/engine/onema-access/utils/resolve-onema-access.util';
 import { FilesFieldSync } from 'src/engine/twenty-orm/field-operations/files-field-sync/files-field-sync';
 import {
   type OperationType,
@@ -785,21 +793,38 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
         this.options.internalContext.flatValidationRuleMaps,
       objectMetadataId: this.options.flatObjectMetadata.id,
     });
+    // Onema fork (ADR-003), rls-design §3.2 point №4: the rows a write leaves
+    // behind are read back under our own predicate, which only means anything if
+    // the write can still be rolled back — so it has to be in a transaction
+    const isOnemaWriteCheckActive =
+      !this.options.shouldBypassPermissionChecks &&
+      isOnemaAccessPossiblyActive();
 
-    if (validationRules.length === 0) {
+    if (validationRules.length === 0 && !isOnemaWriteCheckActive) {
       return write(this);
     }
 
     return this.runAtomically((repository) =>
-      write(repository, (writtenRecords) =>
-        validateRecordsAgainstValidationRulesOrThrow({
-          repository,
-          tableShape: this.options.tableShape,
-          validationRules,
-          writtenRecords,
-          inputRecordIds,
-        }),
-      ),
+      write(repository, async (writtenRecords) => {
+        if (isOnemaWriteCheckActive) {
+          await assertOnemaWrittenRecordsAreAccessible({
+            scope: this.onemaAccessScope,
+            writtenRecords,
+            executeRaw: (sql, parameters) =>
+              repository.executeRaw(sql, parameters),
+          });
+        }
+
+        if (validationRules.length > 0) {
+          await validateRecordsAgainstValidationRulesOrThrow({
+            repository,
+            tableShape: this.options.tableShape,
+            validationRules,
+            writtenRecords,
+            inputRecordIds,
+          });
+        }
+      }),
     );
   }
 
@@ -1054,14 +1079,28 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       recordsToInsert = enriched.entities as Partial<ObjectRecord>[];
     }
 
-    const { columnNames, rows, parameters, insertedColumns, formattedRecords } =
-      this.buildInsertRows(recordsToInsert);
+    const insertRows = this.buildInsertRows(recordsToInsert);
 
     this.validateWriteIsPermitted({
       operationType: 'insert',
       columnsToReturn,
-      updatedColumns: insertedColumns,
+      updatedColumns: insertRows.insertedColumns,
     });
+
+    // Onema fork (ADR-003), rls-design §3.3 point №5: an owner the rules read as
+    // "$me" is filled in when the caller left it empty, after the permission
+    // check on purpose — the role that needs the default is exactly the one that
+    // may not write the field itself
+    const onemaOwnedRecords = applyOnemaOwnerDefaults({
+      scope: this.onemaAccessScope,
+      records: recordsToInsert,
+    });
+
+    const { columnNames, rows, parameters, formattedRecords } = isDefined(
+      onemaOwnedRecords,
+    )
+      ? this.buildInsertRows(onemaOwnedRecords)
+      : insertRows;
 
     validateRLSPredicatesForRecords({
       records: this.formatResult<ObjectRecord[]>(formattedRecords),
@@ -1223,14 +1262,21 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       });
     }
 
-    await this.validateRLSPredicatesForUpdatedRecords(
-      setColumnsByInputIndex.flatMap((setColumns, index) =>
+    const updatesWithRecordBefore = setColumnsByInputIndex.flatMap(
+      (setColumns, index) =>
         rawBeforeByInputIndex[index].map((rawRecordBefore) => ({
           rawRecordBefore,
           setColumns,
         })),
-      ),
     );
+
+    // Onema fork (ADR-003), rls-design §12а Т-2
+    assertOnemaFrozenFieldsAreUnchanged({
+      scope: this.onemaAccessScope,
+      updates: updatesWithRecordBefore,
+    });
+
+    await this.validateRLSPredicatesForUpdatedRecords(updatesWithRecordBefore);
 
     for (const [index, input] of writableInputs.entries()) {
       const setColumns = setColumnsByInputIndex[index];
@@ -1708,11 +1754,19 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     }
 
     if (kind === 'update' && isDefined(setColumns)) {
+      const updatesWithRecordBefore = recordsBefore.map((rawRecordBefore) => ({
+        rawRecordBefore,
+        setColumns,
+      }));
+
+      // Onema fork (ADR-003), rls-design §12а Т-2
+      assertOnemaFrozenFieldsAreUnchanged({
+        scope: this.onemaAccessScope,
+        updates: updatesWithRecordBefore,
+      });
+
       await this.validateRLSPredicatesForUpdatedRecords(
-        recordsBefore.map((rawRecordBefore) => ({
-          rawRecordBefore,
-          setColumns,
-        })),
+        updatesWithRecordBefore,
       );
     }
 
@@ -1916,6 +1970,14 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       updatedColumns,
       authContext: this.options.authContext,
       isRecordSharingEnabled: this.isRecordSharingEnabled,
+    });
+
+    // Onema fork (ADR-003), rls-design §12а Т-1: fields only our application may
+    // write. Here rather than per write path, because every one of them already
+    // passes through this method with the columns it is about to touch
+    assertOnemaProtectedFieldsAreWritable({
+      scope: this.onemaAccessScope,
+      updatedColumns,
     });
   }
 
@@ -2157,13 +2219,19 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
 
     // Onema fork (ADR-003): our own record-level rules, ANDed with whatever
     // upstream decided above; a no-op when no rules file is configured
-    applyOnemaRowAccess({
-      queryBuilder,
+    applyOnemaRowAccess({ queryBuilder, scope: this.onemaAccessScope });
+  }
+
+  // Onema fork (ADR-003): what our rules need from the repository, gathered in
+  // one place so each hook site below stays a single call
+  private get onemaAccessScope(): OnemaAccessScope {
+    return {
       tableShape: this.options.tableShape,
       authContext: this.options.authContext,
       internalContext: this.options.internalContext,
       tableShapeByObjectMetadataId: this.options.tableShapeByObjectMetadataId,
-    });
+      shouldBypassPermissionChecks: this.options.shouldBypassPermissionChecks,
+    };
   }
 
   private applyRowLevelPermissionPredicateForAlias({

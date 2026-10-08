@@ -7,6 +7,7 @@ import {
   type OnemaAccessRules,
   type OnemaCondition,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
+import { resolveOnemaFieldColumnNames } from 'src/engine/onema-access/utils/resolve-onema-field-columns.util';
 import { type WorkspaceTableShape } from 'src/engine/twenty-orm/table-shape/types/workspace-table-shape.type';
 
 const logger = new Logger(ONEMA_ACCESS_LOGGER_CONTEXT);
@@ -137,7 +138,96 @@ const collectProblems = ({
     }
   }
 
+  collectWriteProtectedFieldProblems({ rules, metadata, problems });
+  collectFreezeRuleProblems({ rules, metadata, problems });
+
   return problems;
+};
+
+// A protected or frozen field named with a typo protects nothing, which is the
+// same silent opening as a mistyped object name — and here the field is the one
+// the whole product rule rests on (rls-design §12а)
+const collectWriteProtectedFieldProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  for (const [objectName, roleKeysByFieldName] of Object.entries(
+    rules.writeProtectedFields ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `writeProtectedFields names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    for (const fieldName of Object.keys(roleKeysByFieldName)) {
+      if (
+        resolveOnemaFieldColumnNames({ tableShape, fieldName }).length === 0
+      ) {
+        problems.push(
+          `writeProtectedFields: "${fieldName}" is no field of "${objectName}"`,
+        );
+      }
+    }
+  }
+};
+
+const collectFreezeRuleProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  for (const [objectName, freezeRules] of Object.entries(
+    rules.freezeWhen ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `freezeWhen names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    for (const freezeRule of freezeRules) {
+      // The condition is compared against one stored value, so a composite
+      // field — which is several columns — cannot carry it
+      if (
+        resolveOnemaFieldColumnNames({
+          tableShape,
+          fieldName: freezeRule.field,
+        }).length !== 1
+      ) {
+        problems.push(
+          `freezeWhen: "${freezeRule.field}" is no single-column field of "${objectName}"`,
+        );
+      }
+
+      for (const fieldName of freezeRule.fields) {
+        if (
+          resolveOnemaFieldColumnNames({ tableShape, fieldName }).length === 0
+        ) {
+          problems.push(
+            `freezeWhen: "${fieldName}" is no field of "${objectName}"`,
+          );
+        }
+      }
+    }
+  }
 };
 
 const collectConditionProblems = ({
