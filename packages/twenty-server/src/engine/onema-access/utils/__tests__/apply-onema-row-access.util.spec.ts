@@ -20,6 +20,9 @@ import { type WorkspaceInternalContext } from 'src/engine/twenty-orm/interfaces/
 import { type WorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 
 const SALES_ROLE_ID = '00000000-0000-4000-8000-000000000005';
+const SALES_ROLE_UNIVERSAL_IDENTIFIER = 'onema-sales';
+const APPLICATION_ROLE_ID = '00000000-0000-4000-8000-000000000009';
+const APPLICATION_ROLE_UNIVERSAL_IDENTIFIER = 'onema-application';
 const WORKSPACE_MEMBER_ID = '11111111-1111-4111-8111-111111111111';
 const USER_WORKSPACE_ID = '22222222-2222-4222-8222-222222222222';
 
@@ -33,9 +36,15 @@ const { objectIdByNameSingular, tableShapeByObjectMetadataId } =
   buildTestTableShapeRegistry([opportunityTableShape, companyTableShape]);
 
 const rules: OnemaAccessRules = {
-  roles: { sales: SALES_ROLE_ID },
+  roles: {
+    sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+    application: APPLICATION_ROLE_UNIVERSAL_IDENTIFIER,
+  },
   objects: {
-    opportunity: { sales: { eq: ['owner', '$me'] } },
+    opportunity: {
+      sales: { eq: ['owner', '$me'] },
+      application: { eq: ['owner', '$me'] },
+    },
     company: {},
   },
 };
@@ -50,6 +59,14 @@ const internalContext = {
   objectIdByNameSingular,
   userWorkspaceRoleMap: { [USER_WORKSPACE_ID]: SALES_ROLE_ID },
   apiKeyRoleMap: { 'api-key-id': SALES_ROLE_ID },
+  flatRoleMaps: {
+    byUniversalIdentifier: {},
+    universalIdentifierById: {
+      [SALES_ROLE_ID]: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+      [APPLICATION_ROLE_ID]: APPLICATION_ROLE_UNIVERSAL_IDENTIFIER,
+    },
+    universalIdentifiersByApplicationId: {},
+  },
 } as unknown as WorkspaceInternalContext;
 
 const buildQueryBuilderMock = ({
@@ -150,14 +167,37 @@ describe('applyOnemaRowAccess', () => {
     );
   });
 
-  it('leaves system work untouched', () => {
+  // The trusted bypass is the explicit shouldBypassPermissionChecks the caller
+  // asks for, which returns before this hook; a system auth context on its own
+  // proves nothing, since buildSystemAuthContext is reachable from workflows,
+  // AI tools and the timeline
+  it('hides everything from a system context that was granted no bypass', () => {
     setOnemaAccessRulesForTesting(rules);
 
     const queryBuilderMock = buildQueryBuilderMock({ alias: 'opportunity' });
 
     apply(queryBuilderMock, { type: 'system' } as WorkspaceAuthContext);
 
-    expect(queryBuilderMock.addRowAccessCondition).not.toHaveBeenCalled();
+    expect(queryBuilderMock.addRowAccessCondition).toHaveBeenCalledWith(
+      '1=0',
+      {},
+    );
+  });
+
+  it('hides everything from an application, which has no "$me"', () => {
+    setOnemaAccessRulesForTesting(rules);
+
+    const queryBuilderMock = buildQueryBuilderMock({ alias: 'opportunity' });
+
+    apply(queryBuilderMock, {
+      type: 'application',
+      application: { defaultRoleId: APPLICATION_ROLE_ID },
+    } as unknown as WorkspaceAuthContext);
+
+    expect(queryBuilderMock.addRowAccessCondition).toHaveBeenCalledWith(
+      '1=0',
+      {},
+    );
   });
 
   it('applies nothing until the release gate is open', () => {

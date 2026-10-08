@@ -1,13 +1,16 @@
 import { OnemaAccessException } from 'src/engine/onema-access/exceptions/onema-access.exception';
 import { parseOnemaAccessRules } from 'src/engine/onema-access/utils/parse-onema-access-rules.util';
 
-const SALES_ROLE_ID = '00000000-0000-4000-8000-000000000005';
-const CEO_ROLE_ID = '00000000-0000-4000-8000-000000000001';
+const SALES_ROLE_UNIVERSAL_IDENTIFIER = '00000000-0000-4000-8000-000000000005';
+const CEO_ROLE_UNIVERSAL_IDENTIFIER = '00000000-0000-4000-8000-000000000001';
 
 describe('parseOnemaAccessRules', () => {
   it('accepts a rules file using every condition of this release', () => {
     const rules = {
-      roles: { ceo: CEO_ROLE_ID, sales: SALES_ROLE_ID },
+      roles: {
+        ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+        sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+      },
       objects: {
         opportunity: {
           ceo: { all: true },
@@ -41,25 +44,30 @@ describe('parseOnemaAccessRules', () => {
   it('rejects a condition the schema does not know', () => {
     expect(() =>
       parseOnemaAccessRules({
-        roles: { sales: SALES_ROLE_ID },
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         objects: { opportunity: { sales: { anyParent: { fks: ['leadId'] } } } },
       }),
     ).toThrow(OnemaAccessException);
   });
 
-  it('rejects a role id that is not a uuid', () => {
+  it('rejects two role keys pointing at one role', () => {
     expect(() =>
       parseOnemaAccessRules({
-        roles: { sales: 'sales-role' },
-        objects: { opportunity: { sales: { all: true } } },
+        roles: {
+          sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+          ceo: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        },
+        objects: {
+          opportunity: { ceo: { all: true }, sales: { eq: ['owner', '$me'] } },
+        },
       }),
-    ).toThrow(OnemaAccessException);
+    ).toThrow(/several keys/);
   });
 
   it('rejects a role used on an object but never declared', () => {
     expect(() =>
       parseOnemaAccessRules({
-        roles: { sales: SALES_ROLE_ID },
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         objects: { opportunity: { projectManager: { all: true } } },
       }),
     ).toThrow(/without declaring its role id/);
@@ -68,7 +76,7 @@ describe('parseOnemaAccessRules', () => {
   it('rejects a cycle between parent rules', () => {
     expect(() =>
       parseOnemaAccessRules({
-        roles: { sales: SALES_ROLE_ID },
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         objects: {
           project: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },
@@ -84,7 +92,7 @@ describe('parseOnemaAccessRules', () => {
   it('rejects a parent chain deeper than three objects', () => {
     expect(() =>
       parseOnemaAccessRules({
-        roles: { sales: SALES_ROLE_ID },
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         objects: {
           dataRoomItem: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },

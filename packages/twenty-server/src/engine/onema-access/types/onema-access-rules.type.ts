@@ -26,6 +26,8 @@ export type OnemaParentCondition = {
 export type OnemaRoleKey = string;
 
 export type OnemaAccessRules = {
+  // Role key of the rules file to the universalIdentifier of the Twenty role:
+  // stable across reinstalls and renames, unlike a role id or a UI label
   roles: Record<OnemaRoleKey, string>;
   objects: Record<string, Partial<Record<OnemaRoleKey, OnemaCondition>>>;
 };
@@ -33,7 +35,7 @@ export type OnemaAccessRules = {
 export type OnemaAccessSubject = {
   // Undefined for API keys and applications: `$me` can then match nothing
   workspaceMemberId: string | undefined;
-  roleIds: string[];
+  roleUniversalIdentifiers: string[];
 };
 
 export type OnemaRowAccess =

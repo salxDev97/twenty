@@ -12,10 +12,12 @@ import {
   compileOnemaRowAccess,
 } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 
-const SALES_ROLE_ID = '00000000-0000-4000-8000-000000000005';
-const PROJECT_MANAGER_ROLE_ID = '00000000-0000-4000-8000-000000000006';
-const CONTRACTOR_ROLE_ID = '00000000-0000-4000-8000-000000000007';
-const CEO_ROLE_ID = '00000000-0000-4000-8000-000000000001';
+const SALES_ROLE_UNIVERSAL_IDENTIFIER = '00000000-0000-4000-8000-000000000005';
+const PROJECT_MANAGER_ROLE_UNIVERSAL_IDENTIFIER =
+  '00000000-0000-4000-8000-000000000006';
+const CONTRACTOR_ROLE_UNIVERSAL_IDENTIFIER =
+  '00000000-0000-4000-8000-000000000007';
+const CEO_ROLE_UNIVERSAL_IDENTIFIER = '00000000-0000-4000-8000-000000000001';
 const WORKSPACE_MEMBER_ID = '11111111-1111-4111-8111-111111111111';
 
 const opportunityTableShape = buildTestTableShape({
@@ -61,14 +63,14 @@ const buildContext = ({
 
 const salesSubject: OnemaAccessSubject = {
   workspaceMemberId: WORKSPACE_MEMBER_ID,
-  roleIds: [SALES_ROLE_ID],
+  roleUniversalIdentifiers: [SALES_ROLE_UNIVERSAL_IDENTIFIER],
 };
 
 const baseRoles = {
-  ceo: CEO_ROLE_ID,
-  sales: SALES_ROLE_ID,
-  projectManager: PROJECT_MANAGER_ROLE_ID,
-  contractor: CONTRACTOR_ROLE_ID,
+  ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+  sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+  projectManager: PROJECT_MANAGER_ROLE_UNIVERSAL_IDENTIFIER,
+  contractor: CONTRACTOR_ROLE_UNIVERSAL_IDENTIFIER,
 };
 
 describe('compileOnemaRowAccess', () => {
@@ -156,7 +158,10 @@ describe('compileOnemaRowAccess', () => {
         roles: baseRoles,
         objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
       },
-      subject: { workspaceMemberId: undefined, roleIds: [SALES_ROLE_ID] },
+      subject: {
+        workspaceMemberId: undefined,
+        roleUniversalIdentifiers: [SALES_ROLE_UNIVERSAL_IDENTIFIER],
+      },
     });
 
     expect(
@@ -217,7 +222,10 @@ describe('compileOnemaRowAccess', () => {
       },
       subject: {
         workspaceMemberId: WORKSPACE_MEMBER_ID,
-        roleIds: [SALES_ROLE_ID, CONTRACTOR_ROLE_ID],
+        roleUniversalIdentifiers: [
+          SALES_ROLE_UNIVERSAL_IDENTIFIER,
+          CONTRACTOR_ROLE_UNIVERSAL_IDENTIFIER,
+        ],
       },
     });
 
@@ -259,7 +267,7 @@ describe('compileOnemaRowAccess', () => {
       },
       subject: {
         workspaceMemberId: WORKSPACE_MEMBER_ID,
-        roleIds: [PROJECT_MANAGER_ROLE_ID],
+        roleUniversalIdentifiers: [PROJECT_MANAGER_ROLE_UNIVERSAL_IDENTIFIER],
       },
     });
 
@@ -297,7 +305,7 @@ describe('compileOnemaRowAccess', () => {
       },
       subject: {
         workspaceMemberId: WORKSPACE_MEMBER_ID,
-        roleIds: [PROJECT_MANAGER_ROLE_ID],
+        roleUniversalIdentifiers: [PROJECT_MANAGER_ROLE_UNIVERSAL_IDENTIFIER],
       },
     });
 
@@ -325,7 +333,7 @@ describe('compileOnemaRowAccess', () => {
       },
       subject: {
         workspaceMemberId: WORKSPACE_MEMBER_ID,
-        roleIds: [PROJECT_MANAGER_ROLE_ID],
+        roleUniversalIdentifiers: [PROJECT_MANAGER_ROLE_UNIVERSAL_IDENTIFIER],
       },
     });
 
@@ -379,7 +387,7 @@ describe('compileOnemaRowAccess', () => {
       },
       subject: {
         workspaceMemberId: WORKSPACE_MEMBER_ID,
-        roleIds: [PROJECT_MANAGER_ROLE_ID],
+        roleUniversalIdentifiers: [PROJECT_MANAGER_ROLE_UNIVERSAL_IDENTIFIER],
       },
     });
 

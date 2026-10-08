@@ -67,11 +67,8 @@ export const applyOnemaRowAccess = ({
     authContext,
     userWorkspaceRoleMap: internalContext.userWorkspaceRoleMap,
     apiKeyRoleMap: internalContext.apiKeyRoleMap,
+    flatRoleMaps: internalContext.flatRoleMaps,
   });
-
-  if (!isDefined(subject)) {
-    return;
-  }
 
   const context = buildOnemaCompilationContext({
     rules,

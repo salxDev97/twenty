@@ -34,7 +34,9 @@ export const onemaConditionSchema: z.ZodType<OnemaCondition> = z.lazy(() =>
 );
 
 export const onemaAccessRulesSchema = z.strictObject({
-  roles: z.record(z.string().min(1), z.uuid()),
+  // The value is a role universalIdentifier, which is a uuid for the roles
+  // Twenty ships but a free-form string for the ones an application declares
+  roles: z.record(z.string().min(1), z.string().min(1)),
   objects: z.record(
     z.string().min(1),
     z.record(z.string().min(1), onemaConditionSchema),

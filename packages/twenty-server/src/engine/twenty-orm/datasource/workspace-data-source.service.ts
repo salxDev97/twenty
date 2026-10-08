@@ -124,6 +124,7 @@ export class WorkspaceDataSourceService
       userWorkspaceRoleMap: workspaceContext.userWorkspaceRoleMap,
       roleIdsWithAllRecordsAccess: workspaceContext.roleIdsWithAllRecordsAccess,
       apiKeyRoleMap: workspaceContext.apiKeyRoleMap,
+      flatRoleMaps: workspaceContext.flatRoleMaps,
       eventEmitterService: this.workspaceEventEmitter,
       recordStock: this.workspaceRecordStockService,
       coreDataSource: this.coreDataSource,

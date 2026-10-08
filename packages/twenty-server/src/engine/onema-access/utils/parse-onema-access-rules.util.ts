@@ -27,10 +27,39 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
 
   const rules = parsedRules.data as OnemaAccessRules;
 
+  validateRoleIdentifiersAreUnique(rules);
   validateRoleKeysAreDeclared(rules);
   validateParentChains(rules);
 
   return rules;
+};
+
+// Two role keys pointing at one role would hand the holder the union of both
+// sets of conditions — the widest wins, which is the opposite of closed by
+// default (a single `{ all: true }` would open everything for the other key)
+const validateRoleIdentifiersAreUnique = (rules: OnemaAccessRules): void => {
+  const roleKeysByUniversalIdentifier = new Map<string, string[]>();
+
+  for (const [roleKey, universalIdentifier] of Object.entries(rules.roles)) {
+    roleKeysByUniversalIdentifier.set(universalIdentifier, [
+      ...(roleKeysByUniversalIdentifier.get(universalIdentifier) ?? []),
+      roleKey,
+    ]);
+  }
+
+  for (const [
+    universalIdentifier,
+    roleKeys,
+  ] of roleKeysByUniversalIdentifier.entries()) {
+    if (roleKeys.length > 1) {
+      throw new OnemaAccessException(
+        `Onema access rules give one role "${universalIdentifier}" to several keys: ${roleKeys.join(
+          ', ',
+        )}`,
+        OnemaAccessExceptionCode.INVALID_RULES,
+      );
+    }
+  }
 };
 
 const validateRoleKeysAreDeclared = (rules: OnemaAccessRules): void => {

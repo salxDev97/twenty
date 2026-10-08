@@ -46,7 +46,9 @@ export const buildOnemaCompilationContext = ({
   rules,
   subject,
   roleKeys: Object.entries(rules.roles)
-    .filter(([, roleId]) => subject.roleIds.includes(roleId))
+    .filter(([, universalIdentifier]) =>
+      subject.roleUniversalIdentifiers.includes(universalIdentifier),
+    )
     .map(([roleKey]) => roleKey),
   objectIdByNameSingular,
   tableShapeByObjectMetadataId,
