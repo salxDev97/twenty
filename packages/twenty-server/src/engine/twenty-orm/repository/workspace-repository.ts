@@ -25,6 +25,7 @@ import {
   PermissionsExceptionCode,
   PermissionsExceptionMessage,
 } from 'src/engine/metadata-modules/permissions/permissions.exception';
+import { applyOnemaRowAccess } from 'src/engine/onema-access/utils/apply-onema-row-access.util';
 import { FilesFieldSync } from 'src/engine/twenty-orm/field-operations/files-field-sync/files-field-sync';
 import {
   type OperationType,
@@ -2153,6 +2154,16 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
         operationType: 'select',
       });
     }
+
+    // Onema fork (ADR-003): our own record-level rules, ANDed with whatever
+    // upstream decided above; a no-op when no rules file is configured
+    applyOnemaRowAccess({
+      queryBuilder,
+      tableShape: this.options.tableShape,
+      authContext: this.options.authContext,
+      internalContext: this.options.internalContext,
+      tableShapeByObjectMetadataId: this.options.tableShapeByObjectMetadataId,
+    });
   }
 
   private applyRowLevelPermissionPredicateForAlias({

@@ -118,6 +118,11 @@ const SCHEMA = getWorkspaceSchemaName(WORKSPACE_ID);
         userWorkspaceRoleMap: {},
         apiKeyRoleMap: {},
         roleIdsWithAllRecordsAccess: [],
+        flatRoleMaps: {
+          byUniversalIdentifier: {},
+          universalIdentifierById: {},
+          universalIdentifiersByApplicationId: {},
+        },
         eventEmitterService: { emitDatabaseBatchEvent },
         recordStock: {
           assertRecordStockAvailable: jest.fn().mockResolvedValue(undefined),
