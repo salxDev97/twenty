@@ -201,7 +201,9 @@ describe('onemaRowAccess', () => {
       }),
     );
 
-    expect(response.body.errors).toBeUndefined();
+    // findOne treats a denied record the same as one that was never there:
+    // the same NOT_FOUND error upstream raises for a genuinely missing id
+    expect(response.body.errors[0].extensions.code).toBe('NOT_FOUND');
     expect(response.body.data.company).toBeNull();
   });
 
