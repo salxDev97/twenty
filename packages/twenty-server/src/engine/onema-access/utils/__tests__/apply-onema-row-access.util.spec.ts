@@ -1,7 +1,16 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
 import {
   buildTestTableShape,
   buildTestTableShapeRegistry,
 } from 'src/engine/onema-access/__tests__/utils/build-test-table-shape.util';
+import {
+  ONEMA_ACCESS_ENFORCE_ENABLED_VALUE,
+  ONEMA_ACCESS_ENFORCE_ENVIRONMENT_VARIABLE,
+  ONEMA_ACCESS_RULES_PATH_ENVIRONMENT_VARIABLE,
+} from 'src/engine/onema-access/constants/onema-access.constants';
 import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { applyOnemaRowAccess } from 'src/engine/onema-access/utils/apply-onema-row-access.util';
 import { setOnemaAccessRulesForTesting } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
@@ -62,7 +71,7 @@ const buildQueryBuilderMock = ({
         name,
         isToMany: false,
       })),
-    getJoinedTableShape: (joinAlias: string) =>
+    getJoinedTableShape: (joinAlias: string): WorkspaceTableShape | undefined =>
       joinedTableShapeByAlias[joinAlias],
     markRowLevelPermissionApplied: (mark: string) => {
       if (appliedMarks.has(mark)) {
@@ -149,6 +158,61 @@ describe('applyOnemaRowAccess', () => {
     apply(queryBuilderMock, { type: 'system' } as WorkspaceAuthContext);
 
     expect(queryBuilderMock.addRowAccessCondition).not.toHaveBeenCalled();
+  });
+
+  it('applies nothing until the release gate is open', () => {
+    const temporaryDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'onema-access-gate-'),
+    );
+    const rulesPath = path.join(temporaryDirectory, 'access-rules.json');
+
+    fs.writeFileSync(rulesPath, JSON.stringify(rules));
+    setOnemaAccessRulesForTesting(undefined);
+    process.env[ONEMA_ACCESS_RULES_PATH_ENVIRONMENT_VARIABLE] = rulesPath;
+
+    try {
+      const gatedQueryBuilderMock = buildQueryBuilderMock({
+        alias: 'opportunity',
+      });
+
+      apply(gatedQueryBuilderMock);
+
+      expect(
+        gatedQueryBuilderMock.addRowAccessCondition,
+      ).not.toHaveBeenCalled();
+
+      process.env[ONEMA_ACCESS_ENFORCE_ENVIRONMENT_VARIABLE] =
+        ONEMA_ACCESS_ENFORCE_ENABLED_VALUE;
+
+      const enforcedQueryBuilderMock = buildQueryBuilderMock({
+        alias: 'opportunity',
+      });
+
+      apply(enforcedQueryBuilderMock);
+
+      expect(enforcedQueryBuilderMock.addRowAccessCondition).toHaveBeenCalled();
+    } finally {
+      delete process.env[ONEMA_ACCESS_RULES_PATH_ENVIRONMENT_VARIABLE];
+      delete process.env[ONEMA_ACCESS_ENFORCE_ENVIRONMENT_VARIABLE];
+      fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('closes the whole query when an alias has no table shape', () => {
+    setOnemaAccessRulesForTesting(rules);
+
+    const queryBuilderMock = {
+      ...buildQueryBuilderMock({ alias: 'opportunity' }),
+      getJoinAliases: () => [{ name: 'mystery', isToMany: false }],
+      getJoinedTableShape: () => undefined,
+    };
+
+    apply(queryBuilderMock);
+
+    expect(queryBuilderMock.addRowAccessCondition).toHaveBeenLastCalledWith(
+      '1=0',
+      {},
+    );
   });
 
   it('hides everything from an API key, which has no "$me"', () => {

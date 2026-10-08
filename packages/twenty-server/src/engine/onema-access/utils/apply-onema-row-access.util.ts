@@ -1,7 +1,9 @@
+import { Logger } from '@nestjs/common';
 import { isDefined } from 'twenty-shared/utils';
 
 import { type WorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 import {
+  ONEMA_ACCESS_LOGGER_CONTEXT,
   ONEMA_ALWAYS_FALSE_CONDITION,
   ONEMA_ROW_ACCESS_MARK_PREFIX,
 } from 'src/engine/onema-access/constants/onema-access.constants';
@@ -10,11 +12,16 @@ import {
   compileOnemaRowAccess,
   type OnemaCompilationContext,
 } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
-import { loadOnemaAccessRules } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
+import {
+  getOnemaAccessRulesState,
+  isOnemaAccessEnforced,
+} from 'src/engine/onema-access/utils/load-onema-access-rules.util';
 import { resolveOnemaAccessSubject } from 'src/engine/onema-access/utils/resolve-onema-access-subject.util';
 import { type WorkspaceInternalContext } from 'src/engine/twenty-orm/interfaces/workspace-internal-context.interface';
 import { type WorkspaceSelectQueryBuilder } from 'src/engine/twenty-orm/query-builder/workspace-select-query-builder';
 import { type WorkspaceTableShape } from 'src/engine/twenty-orm/table-shape/types/workspace-table-shape.type';
+
+const logger = new Logger(ONEMA_ACCESS_LOGGER_CONTEXT);
 
 // Single entry point of the Onema record-level rules into the ORM: it runs for
 // every alias the query touches, so reads, joins, exists filters, group-by and
@@ -34,11 +41,27 @@ export const applyOnemaRowAccess = ({
     objectMetadataId: string,
   ) => WorkspaceTableShape;
 }): void => {
-  const rules = loadOnemaAccessRules();
+  const rulesState = getOnemaAccessRulesState();
 
-  if (!isDefined(rules)) {
+  if (rulesState.kind === 'absent') {
     return;
   }
+
+  // Release gate (ADR-003): rules are read and validated whether or not they are
+  // applied, so a stand can load the real file long before ONE-111…113 make
+  // enforcement safe. The testing bridge carries its own enforcement, since the
+  // app under integration test does not see the environment the test sets.
+  if (!rulesState.isTestingOverride && !isOnemaAccessEnforced()) {
+    return;
+  }
+
+  if (rulesState.kind === 'failed') {
+    denyWholeQuery(queryBuilder);
+
+    return;
+  }
+
+  const rules = rulesState.rules;
 
   const subject = resolveOnemaAccessSubject({
     authContext,
@@ -67,8 +90,15 @@ export const applyOnemaRowAccess = ({
   for (const joinAlias of queryBuilder.getJoinAliases()) {
     const joinedTableShape = queryBuilder.getJoinedTableShape(joinAlias.name);
 
+    // An alias whose table we cannot name is an alias we cannot check against
+    // the rules, so the whole query goes rather than the alias being skipped
     if (!isDefined(joinedTableShape)) {
-      continue;
+      logger.error(
+        `Onema access rules cannot be applied to joined alias "${joinAlias.name}": no table shape; the query returns nothing`,
+      );
+      denyWholeQuery(queryBuilder);
+
+      return;
     }
 
     applyForAlias({
@@ -124,4 +154,10 @@ const applyForAlias = ({
 
   queryBuilder.addJoinCondition(alias, condition.sql);
   queryBuilder.setParameters(condition.parameters);
+};
+
+// The main alias carries the denial for the whole query: a join condition alone
+// would still let the row through on a LEFT JOIN
+const denyWholeQuery = (queryBuilder: WorkspaceSelectQueryBuilder): void => {
+  queryBuilder.addRowAccessCondition(ONEMA_ALWAYS_FALSE_CONDITION, {});
 };
