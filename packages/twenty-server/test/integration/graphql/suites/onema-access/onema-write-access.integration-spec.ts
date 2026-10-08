@@ -1,4 +1,9 @@
 import { default as request } from 'supertest';
+import {
+  createFixtureCompany,
+  createFixturePerson,
+  destroyFixtureRecords,
+} from 'test/integration/graphql/suites/onema-access/utils/onema-access-fixtures.util';
 import { createOneOperationFactory } from 'test/integration/graphql/utils/create-one-operation-factory.util';
 import { destroyOneOperationFactory } from 'test/integration/graphql/utils/destroy-one-operation-factory.util';
 import { findManyOperationFactory } from 'test/integration/graphql/utils/find-many-operation-factory.util';
@@ -8,22 +13,19 @@ import { updateOneOperationFactory } from 'test/integration/graphql/utils/update
 
 import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { setOnemaAccessRulesForTesting } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
-import { COMPANY_DATA_SEED_IDS } from 'src/engine/workspace-manager/dev-seeder/data/constants/company-data-seeds.constant';
 import { WORKSPACE_MEMBER_DATA_SEED_IDS } from 'src/engine/workspace-manager/dev-seeder/data/constants/workspace-member-data-seeds.constant';
 
 const client = request(`http://localhost:${APP_PORT}`);
-
-const COMPANY_IDS_UNDER_TEST = [
-  COMPANY_DATA_SEED_IDS.ID_1,
-  COMPANY_DATA_SEED_IDS.ID_2,
-  COMPANY_DATA_SEED_IDS.ID_3,
-  COMPANY_DATA_SEED_IDS.ID_8,
-];
 
 const CREATED_COMPANY_NAME = 'Onema write access (created)';
 const REFUSED_COMPANY_NAME = 'Onema write access (refused)';
 const REFUSED_PERSON_JOB_TITLE = 'Onema write access (refused person)';
 const APPLICATION_UNIVERSAL_IDENTIFIER = 'onema-write-access-test-application';
+
+const OWNED_COMPANY_NAME = 'Onema write access (owned)';
+const SECOND_OWNED_COMPANY_NAME = 'Onema write access (owned, second)';
+const FOREIGN_COMPANY_NAME = 'Onema write access (foreign)';
+const OWNED_PERSON_JOB_TITLE = 'Onema write access (owned person)';
 
 type SeedCompany = {
   id: string;
@@ -101,7 +103,6 @@ describe('onemaWriteAccess', () => {
   let secondOwnedCompanyId: string;
   let foreignCompanyId: string;
   let ownedPersonId: string;
-  let ownedPersonJobTitle: string | null;
 
   const companyOwnedByMeRules = (): OnemaAccessRules => ({
     roles: { member: memberRoleUniversalIdentifier },
@@ -146,40 +147,48 @@ describe('onemaWriteAccess', () => {
 
     expect(memberRoleUniversalIdentifier).toBeDefined();
 
-    const companies = await readBehindTheRules<SeedCompany>({
-      objectMetadataSingularName: 'company',
-      objectMetadataPluralName: 'companies',
-      gqlFields: 'id name accountOwner { id }',
-      filter: { id: { in: COMPANY_IDS_UNDER_TEST } },
-    });
+    setOnemaAccessRulesForTesting(undefined);
 
-    const ownedCompanies = companies.filter(
-      (company) =>
-        company.accountOwner?.id === WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
-    );
-    const foreignCompany = companies.find(
-      (company) =>
-        company.accountOwner?.id !== WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
-    );
+    ownedCompanyId = (
+      await createFixtureCompany({
+        name: OWNED_COMPANY_NAME,
+        accountOwnerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+      })
+    ).id;
+    secondOwnedCompanyId = (
+      await createFixtureCompany({
+        name: SECOND_OWNED_COMPANY_NAME,
+        accountOwnerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+      })
+    ).id;
+    foreignCompanyId = (
+      await createFixtureCompany({
+        name: FOREIGN_COMPANY_NAME,
+        accountOwnerId: WORKSPACE_MEMBER_DATA_SEED_IDS.PHIL,
+      })
+    ).id;
 
-    expect(ownedCompanies.length).toBeGreaterThan(1);
-    expect(foreignCompany).toBeDefined();
+    // The person hangs on a company of the author, since the parent it hangs on
+    // is the whole point of the child rule
+    ownedPersonId = (
+      await createFixturePerson({
+        jobTitle: OWNED_PERSON_JOB_TITLE,
+        companyId: ownedCompanyId,
+      })
+    ).id;
+  });
 
-    ownedCompanyId = ownedCompanies[0].id;
-    secondOwnedCompanyId = ownedCompanies[1].id;
-    foreignCompanyId = (foreignCompany as SeedCompany).id;
+  afterAll(async () => {
+    setOnemaAccessRulesForTesting(undefined);
 
-    const ownedPeople = await readBehindTheRules<SeedPerson>({
+    await destroyFixtureRecords({
       objectMetadataSingularName: 'person',
-      objectMetadataPluralName: 'people',
-      gqlFields: 'id jobTitle company { id }',
-      filter: { company: { id: { eq: ownedCompanyId } } },
+      recordIds: [ownedPersonId],
     });
-
-    expect(ownedPeople.length).toBeGreaterThan(0);
-
-    ownedPersonId = ownedPeople[0].id;
-    ownedPersonJobTitle = ownedPeople[0].jobTitle;
+    await destroyFixtureRecords({
+      objectMetadataSingularName: 'company',
+      recordIds: [ownedCompanyId, secondOwnedCompanyId, foreignCompanyId],
+    });
   });
 
   afterEach(() => setOnemaAccessRulesForTesting(undefined));
@@ -366,7 +375,7 @@ describe('onemaWriteAccess', () => {
           filter: { id: { eq: ownedPersonId } },
         })
       )[0].jobTitle,
-    ).toBe(ownedPersonJobTitle);
+    ).toBe(OWNED_PERSON_JOB_TITLE);
   });
 
   it('lets a role the rules name write the protected field it names', async () => {
@@ -397,7 +406,7 @@ describe('onemaWriteAccess', () => {
         objectMetadataSingularName: 'person',
         gqlFields: 'id jobTitle',
         recordId: ownedPersonId,
-        data: { jobTitle: ownedPersonJobTitle },
+        data: { jobTitle: OWNED_PERSON_JOB_TITLE },
       }),
     );
   });
@@ -481,7 +490,7 @@ describe('onemaWriteAccess', () => {
         objectMetadataSingularName: 'person',
         gqlFields: 'id jobTitle company { id }',
         recordId: ownedPersonId,
-        data: { jobTitle: ownedPersonJobTitle, companyId: ownedCompanyId },
+        data: { jobTitle: OWNED_PERSON_JOB_TITLE, companyId: ownedCompanyId },
       }),
     );
   });
