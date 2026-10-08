@@ -7,6 +7,8 @@ import {
   ONEMA_ALWAYS_FALSE_CONDITION,
   ONEMA_ROW_ACCESS_MARK_PREFIX,
 } from 'src/engine/onema-access/constants/onema-access.constants';
+import { type OnemaRowAccess } from 'src/engine/onema-access/types/onema-access-rules.type';
+import { validateOnemaAccessRulesAgainstMetadata } from 'src/engine/onema-access/utils/validate-onema-access-rules-against-metadata.util';
 import {
   buildOnemaCompilationContext,
   compileOnemaRowAccess,
@@ -62,6 +64,22 @@ export const applyOnemaRowAccess = ({
   }
 
   const rules = rulesState.rules;
+  const validation = validateOnemaAccessRulesAgainstMetadata({
+    rules,
+    rulesVersion: rulesState.contentHash,
+    flatObjectMetadataMaps: internalContext.flatObjectMetadataMaps,
+    metadata: {
+      objectIdByNameSingular: internalContext.objectIdByNameSingular,
+      tableShapeByObjectMetadataId,
+      flatRoleMaps: internalContext.flatRoleMaps,
+    },
+  });
+
+  if (validation.kind === 'invalid') {
+    denyWholeQuery(queryBuilder);
+
+    return;
+  }
 
   const subject = resolveOnemaAccessSubject({
     authContext,
@@ -126,11 +144,27 @@ const applyForAlias = ({
     return;
   }
 
-  const rowAccess = compileOnemaRowAccess({
-    tableShape,
-    tableAlias: alias,
-    context,
-  });
+  // Validation above should have caught anything the compiler can refuse, so
+  // this is a backstop: a refusal here must still end as no rows, never as a
+  // 500 that an unfiltered retry could follow
+  let rowAccess: OnemaRowAccess;
+
+  try {
+    rowAccess = compileOnemaRowAccess({
+      tableShape,
+      tableAlias: alias,
+      context,
+    });
+  } catch (error) {
+    logger.error(
+      `Onema access rules failed to compile for alias "${alias}" on "${tableShape.nameSingular}": ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    denyWholeQuery(queryBuilder);
+
+    return;
+  }
 
   if (rowAccess.kind === 'open') {
     return;

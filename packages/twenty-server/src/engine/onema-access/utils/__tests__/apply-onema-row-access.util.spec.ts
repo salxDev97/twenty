@@ -57,10 +57,14 @@ const userAuthContext = {
 
 const internalContext = {
   objectIdByNameSingular,
+  flatObjectMetadataMaps: {},
   userWorkspaceRoleMap: { [USER_WORKSPACE_ID]: SALES_ROLE_ID },
   apiKeyRoleMap: { 'api-key-id': SALES_ROLE_ID },
   flatRoleMaps: {
-    byUniversalIdentifier: {},
+    byUniversalIdentifier: {
+      [SALES_ROLE_UNIVERSAL_IDENTIFIER]: { id: SALES_ROLE_ID },
+      [APPLICATION_ROLE_UNIVERSAL_IDENTIFIER]: { id: APPLICATION_ROLE_ID },
+    },
     universalIdentifierById: {
       [SALES_ROLE_ID]: SALES_ROLE_UNIVERSAL_IDENTIFIER,
       [APPLICATION_ROLE_ID]: APPLICATION_ROLE_UNIVERSAL_IDENTIFIER,
@@ -236,6 +240,24 @@ describe('applyOnemaRowAccess', () => {
       delete process.env[ONEMA_ACCESS_ENFORCE_ENVIRONMENT_VARIABLE];
       fs.rmSync(temporaryDirectory, { recursive: true, force: true });
     }
+  });
+
+  // A typo leaves the object it meant to protect with no rule at all, which
+  // reads as "upstream permissions only" — the one failure mode that opens data
+  it('closes the whole query when the rules name an object the workspace lacks', () => {
+    setOnemaAccessRulesForTesting({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { opportuntiy: { sales: { eq: ['owner', '$me'] } } },
+    });
+
+    const queryBuilderMock = buildQueryBuilderMock({ alias: 'opportunity' });
+
+    apply(queryBuilderMock);
+
+    expect(queryBuilderMock.addRowAccessCondition).toHaveBeenCalledWith(
+      '1=0',
+      {},
+    );
   });
 
   it('closes the whole query when an alias has no table shape', () => {
