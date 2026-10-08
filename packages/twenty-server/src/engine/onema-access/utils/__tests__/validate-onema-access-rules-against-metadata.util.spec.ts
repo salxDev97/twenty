@@ -172,4 +172,50 @@ describe('validateOnemaAccessRulesAgainstMetadata', () => {
       }),
     ).toBe(first);
   });
+
+  it('accepts protected fields and a freeze rule that exist', () => {
+    expect(
+      validate({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { task: { sales: { all: true } } },
+        writeProtectedFields: { task: { project: [] } },
+        freezeWhen: {
+          task: [{ field: 'id', equals: 'frozen', fields: ['project'] }],
+        },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  // A mistyped protected field protects nothing, and nothing else in the file
+  // says it was meant to be protected at all
+  it('rejects a protected field this workspace does not have', () => {
+    const validation = validate({
+      application: 'onema-application',
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { task: { sales: { all: true } } },
+      writeProtectedFields: { task: { onemaApprovalDecison: [] } },
+      freezeWhen: {},
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(/writeProtectedFields: "onemaApprovalDecison" is no field/);
+  });
+
+  it('rejects a freeze rule naming a field this workspace does not have', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { task: { sales: { all: true } } },
+      freezeWhen: {
+        task: [{ field: 'onemaStage', equals: 'DEAL', fields: ['project'] }],
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(/freezeWhen: "onemaStage" is no single-column field/);
+  });
 });

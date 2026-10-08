@@ -332,4 +332,93 @@ describe('parseOnemaAccessRules', () => {
       }),
     ).toThrow(/nest deeper/);
   });
+
+  it('accepts protected fields and a freeze rule', () => {
+    const rules = {
+      application: 'onema-application',
+      roles: { ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER },
+      requiredObjects: [],
+      objects: { opportunity: { ceo: { all: true } } },
+      writeProtectedFields: {
+        opportunity: { onemaPaymentConfirmation: [], orgRole: ['ceo'] },
+      },
+      freezeWhen: {
+        opportunity: [
+          { field: 'onemaStage', equals: 'DEAL', fields: ['company'] },
+        ],
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  it('rejects a file that does not say which fields are protected', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        freezeWhen: {},
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/writeProtectedFields/);
+  });
+
+  // Nothing could ever write such a field, so the file describes a rule it
+  // cannot have meant
+  it('rejects protected fields without an application to write them', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: { opportunity: { onemaPaymentConfirmation: [] } },
+        freezeWhen: {},
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/declare no "application"/);
+  });
+
+  it('rejects a protected field given to a role nobody declared', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: { opportunity: { orgRole: ['ceo'] } },
+        freezeWhen: {},
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/without declaring its role id/);
+  });
+
+  it('rejects an object listed under freezeWhen with no rule', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: { opportunity: [] },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/freezeWhen/);
+  });
+
+  it('rejects a freeze rule naming one field twice', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {
+          opportunity: [
+            {
+              field: 'onemaStage',
+              equals: 'DEAL',
+              fields: ['company', 'company'],
+            },
+          ],
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/twice in one rule/);
+  });
 });

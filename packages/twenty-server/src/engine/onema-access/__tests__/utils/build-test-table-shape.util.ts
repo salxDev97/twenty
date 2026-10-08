@@ -7,17 +7,21 @@ export const buildTestTableShape = ({
   nameSingular,
   columnNames = [],
   joinColumnNameByFieldName = {},
+  compositeParentFieldNameByColumnName = {},
   hasDeletedAtColumn = true,
 }: {
   nameSingular: string;
   columnNames?: string[];
   joinColumnNameByFieldName?: Record<string, string>;
+  // A composite field is several columns, each naming the field it belongs to
+  compositeParentFieldNameByColumnName?: Record<string, string>;
   hasDeletedAtColumn?: boolean;
 }): WorkspaceTableShape => {
   const allColumnNames = [
     'id',
     ...columnNames,
     ...Object.values(joinColumnNameByFieldName),
+    ...Object.keys(compositeParentFieldNameByColumnName),
     ...(hasDeletedAtColumn ? ['deletedAt'] : []),
   ];
 
@@ -34,6 +38,8 @@ export const buildTestTableShape = ({
           fieldMetadataId: `field-metadata-id-${nameSingular}-${columnName}`,
           fieldName: columnName,
           fieldMetadataType: FieldMetadataType.TEXT,
+          compositeParentFieldName:
+            compositeParentFieldNameByColumnName[columnName],
         },
       ]),
     ),
