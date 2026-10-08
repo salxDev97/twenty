@@ -81,6 +81,46 @@ const findPeople = async (): Promise<
   );
 };
 
+const findPeopleOrderedByCompany = async (): Promise<{ id: string }[]> => {
+  const response = await makeRequestAsJony(
+    findManyOperationFactory({
+      objectMetadataSingularName: 'person',
+      objectMetadataPluralName: 'people',
+      gqlFields: 'id',
+      filter: { company: { id: { in: COMPANY_IDS_UNDER_TEST } } },
+      orderBy: [{ company: { name: 'AscNullsLast' } }],
+      first: 200,
+    }),
+  );
+
+  expect(response.body.errors).toBeUndefined();
+
+  return response.body.data.people.edges.map(
+    (edge: { node: { id: string } }) => edge.node,
+  );
+};
+
+const findCompaniesWithPeople = async (): Promise<
+  { name: string; people: { edges: { node: { id: string } }[] } }[]
+> => {
+  const response = await makeRequestAsJony(
+    findManyOperationFactory({
+      objectMetadataSingularName: 'company',
+      objectMetadataPluralName: 'companies',
+      gqlFields: 'id name people { edges { node { id } } }',
+      filter: companyFilter,
+    }),
+  );
+
+  expect(response.body.errors).toBeUndefined();
+
+  return response.body.data.companies.edges.map(
+    (edge: {
+      node: { name: string; people: { edges: { node: { id: string } }[] } };
+    }) => edge.node,
+  );
+};
+
 const groupCompaniesByName = async () => {
   const response = await makeRequestAsJony(
     groupByOperationFactory({
@@ -101,7 +141,7 @@ const groupCompaniesByName = async () => {
 };
 
 describe('onemaRowAccess', () => {
-  let memberRoleId: string;
+  let memberRoleUniversalIdentifier: string;
   let allCompanyNames: string[];
   let ownedCompanyNames: string[];
   let foreignCompanyId: string;
@@ -115,15 +155,27 @@ describe('onemaRowAccess', () => {
           query GetRoles {
             getRoles {
               id
-              label
+              universalIdentifier
+              workspaceMembers {
+                id
+              }
             }
           }
         `,
       });
 
-    memberRoleId = rolesResponse.body.data.getRoles.find(
-      (role: { label: string }) => role.label === 'Member',
-    ).id;
+    // rls-design §4 forbids identifying a role by its UI label, which is
+    // renamed: the rule names the universalIdentifier, and the test finds the
+    // role the way the product does — by who actually holds it
+    memberRoleUniversalIdentifier = rolesResponse.body.data.getRoles.find(
+      (role: { workspaceMembers?: { id: string }[] }) =>
+        role.workspaceMembers?.some(
+          (workspaceMember) =>
+            workspaceMember.id === WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+        ),
+    ).universalIdentifier;
+
+    expect(memberRoleUniversalIdentifier).toBeDefined();
 
     // Expectations come from the unfiltered view, so the test does not restate
     // which seeded company belongs to whom
@@ -153,11 +205,23 @@ describe('onemaRowAccess', () => {
 
   const installCompanyRule = (condition: OnemaCondition | undefined) => {
     const rules: OnemaAccessRules = {
-      roles: { member: memberRoleId },
+      roles: { member: memberRoleUniversalIdentifier },
       objects: { company: condition ? { member: condition } : {} },
     };
 
     setOnemaAccessRulesForTesting(rules);
+  };
+
+  const installOwnedCompanyAndItsPeopleRule = () => {
+    setOnemaAccessRulesForTesting({
+      roles: { member: memberRoleUniversalIdentifier },
+      objects: {
+        company: { member: { eq: ['accountOwner', '$me'] } },
+        person: {
+          member: { parent: { foreignKey: 'company', object: 'company' } },
+        },
+      },
+    });
   };
 
   it('changes nothing while no rules file is configured', async () => {
@@ -239,17 +303,56 @@ describe('onemaRowAccess', () => {
     expect(expectedPersonIds.length).toBeGreaterThan(0);
     expect(expectedPersonIds.length).toBeLessThan(allPeople.length);
 
-    setOnemaAccessRulesForTesting({
-      roles: { member: memberRoleId },
-      objects: {
-        company: { member: { eq: ['accountOwner', '$me'] } },
-        person: {
-          member: { parent: { foreignKey: 'company', object: 'company' } },
-        },
-      },
-    });
+    installOwnedCompanyAndItsPeopleRule();
 
     const visiblePeople = await findPeople();
+
+    expect(visiblePeople.map((person) => person.id).sort()).toEqual(
+      [...expectedPersonIds].sort(),
+    );
+  });
+
+  // Two aliases of two different objects in one query, which is where a rule
+  // applied to the main alias only would still leak through the relation
+  it('narrows a relation read nested under an already narrowed list', async () => {
+    setOnemaAccessRulesForTesting(undefined);
+
+    const allPeople = await findPeople();
+    const expectedPersonIds = allPeople
+      .filter((person) =>
+        ownedCompanyNames.includes(person.company?.name ?? ''),
+      )
+      .map((person) => person.id);
+
+    installOwnedCompanyAndItsPeopleRule();
+
+    const nested = await findCompaniesWithPeople();
+
+    expect(nested.map((company) => company.name).sort()).toEqual(
+      [...ownedCompanyNames].sort(),
+    );
+    expect(
+      nested
+        .flatMap((company) => company.people.edges.map((edge) => edge.node.id))
+        .sort(),
+    ).toEqual([...expectedPersonIds].sort());
+  });
+
+  // Filter and order both join company, so the same table carries the rule
+  // under more than one alias of one query
+  it('narrows a list filtered and ordered by the same relation', async () => {
+    setOnemaAccessRulesForTesting(undefined);
+
+    const allPeople = await findPeople();
+    const expectedPersonIds = allPeople
+      .filter((person) =>
+        ownedCompanyNames.includes(person.company?.name ?? ''),
+      )
+      .map((person) => person.id);
+
+    installOwnedCompanyAndItsPeopleRule();
+
+    const visiblePeople = await findPeopleOrderedByCompany();
 
     expect(visiblePeople.map((person) => person.id).sort()).toEqual(
       [...expectedPersonIds].sort(),
@@ -261,5 +364,17 @@ describe('onemaRowAccess', () => {
 
     expect(await findCompanies()).toEqual([]);
     expect(await countCompanies()).toBe(0);
+  });
+
+  it('hides every record when the rules name an object this workspace lacks', async () => {
+    setOnemaAccessRulesForTesting({
+      roles: { member: memberRoleUniversalIdentifier },
+      objects: {
+        compny: { member: { all: true } },
+        company: { member: { all: true } },
+      },
+    });
+
+    expect(await findCompanies()).toEqual([]);
   });
 });
