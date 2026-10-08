@@ -1,0 +1,62 @@
+{
+  "roles": {
+    "ceo": "00000000-0000-4000-8000-000000000001",
+    "coo": "00000000-0000-4000-8000-000000000002",
+    "salesHead": "00000000-0000-4000-8000-000000000003",
+    "deliveryHead": "00000000-0000-4000-8000-000000000004",
+    "sales": "00000000-0000-4000-8000-000000000005",
+    "projectManager": "00000000-0000-4000-8000-000000000006",
+    "contractor": "00000000-0000-4000-8000-000000000007",
+    "client": "00000000-0000-4000-8000-000000000008"
+  },
+  "objects": {
+    "opportunity": {
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "sales": { "eq": ["owner", "$me"] }
+    },
+    "project": {
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "deliveryHead": { "all": true },
+      "sales": { "eq": ["salesOwner", "$me"] },
+      "projectManager": { "eq": ["projectManager", "$me"] },
+      "contractor": {
+        "exists": {
+          "object": "projectMember",
+          "backForeignKey": "project",
+          "where": { "eq": ["member", "$me"] }
+        }
+      },
+      "client": {
+        "exists": {
+          "object": "clientAccess",
+          "backForeignKey": "project",
+          "where": { "eq": ["member", "$me"] }
+        }
+      }
+    },
+    "task": {
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "deliveryHead": { "all": true },
+      "projectManager": { "parent": { "foreignKey": "project", "object": "project" } },
+      "contractor": { "eq": ["assignee", "$me"] }
+    },
+    "dataRoomItem": {
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "deliveryHead": { "all": true },
+      "projectManager": { "parent": { "foreignKey": "project", "object": "project" } },
+      "contractor": { "parent": { "foreignKey": "project", "object": "project" } },
+      "client": {
+        "and": [
+          { "eq": ["visibleToClient", true] },
+          { "parent": { "foreignKey": "project", "object": "project" } }
+        ]
+      }
+    }
+  }
+}
