@@ -1,9 +1,13 @@
 import gql from 'graphql-tag';
 import { default as request } from 'supertest';
+import { deleteOneOperationFactory } from 'test/integration/graphql/utils/delete-one-operation-factory.util';
 import { findManyOperationFactory } from 'test/integration/graphql/utils/find-many-operation-factory.util';
 import { findOneOperationFactory } from 'test/integration/graphql/utils/find-one-operation-factory.util';
 import { groupByOperationFactory } from 'test/integration/graphql/utils/group-by-operation-factory.util';
+import { makeGraphqlApiRequest as makeRequestAsAdmin } from 'test/integration/graphql/utils/make-graphql-api-request.util';
 import { makeGraphqlApiRequestWithMemberRole as makeRequestAsJony } from 'test/integration/graphql/utils/make-graphql-api-request-with-member-role.util';
+import { restoreOneOperationFactory } from 'test/integration/graphql/utils/restore-one-operation-factory.util';
+import { updateOneOperationFactory } from 'test/integration/graphql/utils/update-one-operation-factory.util';
 
 import {
   type OnemaAccessRules,
@@ -140,11 +144,36 @@ const groupCompaniesByName = async () => {
   }[];
 };
 
+// Read back with the rules switched off and as the admin, because a rule that
+// names only the member role closes the object for every other role too: the
+// question here is what is in the row, not who may see it
+const readCompanyBehindTheRules = async (
+  companyId: string,
+): Promise<{ id: string; name: string; deletedAt: string | null } | null> => {
+  setOnemaAccessRulesForTesting(undefined);
+
+  const response = await makeRequestAsAdmin(
+    findManyOperationFactory({
+      objectMetadataSingularName: 'company',
+      objectMetadataPluralName: 'companies',
+      gqlFields: 'id name deletedAt',
+      filter: { id: { eq: companyId } },
+    }),
+  );
+
+  expect(response.body.errors).toBeUndefined();
+
+  return response.body.data.companies.edges[0]?.node ?? null;
+};
+
 describe('onemaRowAccess', () => {
   let memberRoleUniversalIdentifier: string;
   let allCompanyNames: string[];
   let ownedCompanyNames: string[];
+  let ownedCompanyId: string;
+  let ownedCompanyName: string;
   let foreignCompanyId: string;
+  let foreignCompanyName: string;
 
   beforeAll(async () => {
     const rolesResponse = await client
@@ -192,10 +221,20 @@ describe('onemaRowAccess', () => {
           company.accountOwner?.id === WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
       )
       .map((company: { name: string }) => company.name);
-    foreignCompanyId = companies.find(
+
+    const ownedCompany = companies.find(
+      (company: { accountOwner?: { id: string } }) =>
+        company.accountOwner?.id === WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+    );
+    const foreignCompany = companies.find(
       (company: { accountOwner?: { id: string } }) =>
         company.accountOwner?.id !== WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
-    ).id;
+    );
+
+    ownedCompanyId = ownedCompany.id;
+    ownedCompanyName = ownedCompany.name;
+    foreignCompanyId = foreignCompany.id;
+    foreignCompanyName = foreignCompany.name;
 
     expect(ownedCompanyNames.length).toBeGreaterThan(0);
     expect(ownedCompanyNames.length).toBeLessThan(allCompanyNames.length);
@@ -377,6 +416,94 @@ describe('onemaRowAccess', () => {
 
     expect(await findCompanies()).toEqual([]);
     expect(await findPeople()).toEqual([]);
+  });
+
+  // The hook hangs on the criteria of UPDATE and DELETE as well as on SELECT
+  // (rls-design §11, S1). Both directions are asserted in one test on purpose:
+  // "the foreign row did not change" means nothing unless the same rule lets
+  // the owned row change
+  it('updates the record of the member and not the one of somebody else', async () => {
+    const renamed = `${ownedCompanyName} (onema row access)`;
+
+    installCompanyRule({ eq: ['accountOwner', '$me'] });
+
+    const ownedUpdate = await makeRequestAsJony(
+      updateOneOperationFactory({
+        objectMetadataSingularName: 'company',
+        gqlFields: 'id name',
+        recordId: ownedCompanyId,
+        data: { name: renamed },
+      }),
+    );
+
+    expect(ownedUpdate.body.errors).toBeUndefined();
+    expect(ownedUpdate.body.data.updateCompany.name).toBe(renamed);
+
+    const foreignUpdate = await makeRequestAsJony(
+      updateOneOperationFactory({
+        objectMetadataSingularName: 'company',
+        gqlFields: 'id name',
+        recordId: foreignCompanyId,
+        data: { name: 'written through a closed rule' },
+      }),
+    );
+
+    expect(foreignUpdate.body.data?.updateCompany ?? null).toBeNull();
+
+    expect((await readCompanyBehindTheRules(foreignCompanyId))?.name).toBe(
+      foreignCompanyName,
+    );
+
+    await makeRequestAsAdmin(
+      updateOneOperationFactory({
+        objectMetadataSingularName: 'company',
+        gqlFields: 'id name',
+        recordId: ownedCompanyId,
+        data: { name: ownedCompanyName },
+      }),
+    );
+  });
+
+  it('soft-deletes the record of the member and not the one of somebody else', async () => {
+    installCompanyRule({ eq: ['accountOwner', '$me'] });
+
+    const ownedDelete = await makeRequestAsJony(
+      deleteOneOperationFactory({
+        objectMetadataSingularName: 'company',
+        gqlFields: 'id deletedAt',
+        recordId: ownedCompanyId,
+      }),
+    );
+
+    expect(ownedDelete.body.errors).toBeUndefined();
+    expect(ownedDelete.body.data.deleteCompany.deletedAt).not.toBeNull();
+
+    const foreignDelete = await makeRequestAsJony(
+      deleteOneOperationFactory({
+        objectMetadataSingularName: 'company',
+        gqlFields: 'id deletedAt',
+        recordId: foreignCompanyId,
+      }),
+    );
+
+    expect(foreignDelete.body.data?.deleteCompany ?? null).toBeNull();
+
+    // A soft-deleted row drops out of an ordinary read, so still being there is
+    // the proof that the delete touched no row
+    const foreignCompany = await readCompanyBehindTheRules(foreignCompanyId);
+
+    expect(foreignCompany).not.toBeNull();
+    expect(foreignCompany?.deletedAt).toBeNull();
+
+    await makeRequestAsAdmin(
+      restoreOneOperationFactory({
+        objectMetadataSingularName: 'company',
+        gqlFields: 'id deletedAt',
+        recordId: ownedCompanyId,
+      }),
+    );
+
+    expect(await readCompanyBehindTheRules(ownedCompanyId)).not.toBeNull();
   });
 
   it('hides every record when the rules name an object this workspace lacks', async () => {
