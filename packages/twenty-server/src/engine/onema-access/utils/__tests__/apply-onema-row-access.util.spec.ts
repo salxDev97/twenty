@@ -13,6 +13,7 @@ import {
 } from 'src/engine/onema-access/constants/onema-access.constants';
 import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { applyOnemaRowAccess } from 'src/engine/onema-access/utils/apply-onema-row-access.util';
+import { resetOnemaParameterNamespaceForTesting } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import { setOnemaAccessRulesForTesting } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
 import { type WorkspaceSelectQueryBuilder } from 'src/engine/twenty-orm/query-builder/workspace-select-query-builder';
 import { type WorkspaceTableShape } from 'src/engine/twenty-orm/table-shape/types/workspace-table-shape.type';
@@ -119,6 +120,8 @@ const apply = (
   });
 
 describe('applyOnemaRowAccess', () => {
+  beforeEach(() => resetOnemaParameterNamespaceForTesting());
+
   afterEach(() => setOnemaAccessRulesForTesting(undefined));
 
   it('does nothing when no rules file is configured', () => {
@@ -139,8 +142,8 @@ describe('applyOnemaRowAccess', () => {
     apply(queryBuilderMock);
 
     expect(queryBuilderMock.addRowAccessCondition).toHaveBeenCalledWith(
-      '"opportunity"."ownerId" = :onema_opportunity_p0',
-      { onema_opportunity_p0: WORKSPACE_MEMBER_ID },
+      '"opportunity"."ownerId" = :onema_0_opportunity_p0',
+      { onema_0_opportunity_p0: WORKSPACE_MEMBER_ID },
     );
   });
 

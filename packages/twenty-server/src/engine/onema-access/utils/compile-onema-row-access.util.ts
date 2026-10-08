@@ -21,6 +21,16 @@ import { escapeIdentifier } from 'src/engine/workspace-manager/workspace-migrati
 
 const CURRENT_MEMBER_TOKEN = '$me';
 
+// Two aliases can sanitize to one name ("task-owner" and "task_owner" both give
+// "task_owner"), and a query builder merges parameters from clones and from
+// copyWhereFrom, so the alias alone cannot keep parameter names apart. An
+// ordinal that never repeats in this process can.
+let nextParameterNamespace = 0;
+
+export const resetOnemaParameterNamespaceForTesting = (): void => {
+  nextParameterNamespace = 0;
+};
+
 export type OnemaCompilationContext = {
   rules: OnemaAccessRules;
   subject: OnemaAccessSubject;
@@ -62,17 +72,24 @@ export const compileOnemaRowAccess = ({
   tableShape: WorkspaceTableShape;
   tableAlias: string;
   context: OnemaCompilationContext;
-}): OnemaRowAccess =>
-  compileObjectAccess({
+}): OnemaRowAccess => {
+  const parameterNamespace = nextParameterNamespace;
+
+  nextParameterNamespace += 1;
+
+  return compileObjectAccess({
     tableShape,
     tableAlias,
     objectPath: [tableShape.nameSingular],
     state: {
       context,
-      namePrefix: `${ONEMA_PARAMETER_PREFIX}_${sanitizeNamePart(tableAlias)}`,
+      namePrefix: `${ONEMA_PARAMETER_PREFIX}_${parameterNamespace}_${sanitizeNamePart(
+        tableAlias,
+      )}`,
       nextIndex: 0,
     },
   });
+};
 
 // An object listed in the rules is closed to every role the rules do not name;
 // an object absent from the rules keeps upstream object and field permissions
@@ -227,6 +244,18 @@ const compileExists = ({
     objectName: object,
     context: state.context,
   });
+  // The target of an exists is one more object on the chain, exactly like the
+  // target of a parent: without counting it, exists → parent → exists walks
+  // past the depth limit and can revisit an object it already joined
+  const nextObjectPath = [...objectPath, targetTableShape.nameSingular];
+
+  if (
+    objectPath.includes(targetTableShape.nameSingular) ||
+    nextObjectPath.length > ONEMA_MAX_RULE_DEPTH
+  ) {
+    return { kind: 'denied' };
+  }
+
   const backColumnName = resolveColumnName({
     tableShape: targetTableShape,
     fieldName: backForeignKey,
@@ -246,7 +275,7 @@ const compileExists = ({
       condition: where,
       tableShape: targetTableShape,
       tableAlias: targetAlias,
-      objectPath,
+      objectPath: nextObjectPath,
       state,
     });
 

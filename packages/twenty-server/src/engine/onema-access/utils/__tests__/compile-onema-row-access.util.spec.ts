@@ -10,6 +10,7 @@ import {
 import {
   buildOnemaCompilationContext,
   compileOnemaRowAccess,
+  resetOnemaParameterNamespaceForTesting,
 } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 
 const SALES_ROLE_UNIVERSAL_IDENTIFIER = '00000000-0000-4000-8000-000000000005';
@@ -74,6 +75,8 @@ const baseRoles = {
 };
 
 describe('compileOnemaRowAccess', () => {
+  beforeEach(() => resetOnemaParameterNamespaceForTesting());
+
   it('leaves an object that no rule mentions to upstream permissions', () => {
     const context = buildContext({
       rules: {
@@ -146,8 +149,8 @@ describe('compileOnemaRowAccess', () => {
     ).toEqual({
       kind: 'gated',
       condition: {
-        sql: '"opportunity"."ownerId" = :onema_opportunity_p0',
-        parameters: { onema_opportunity_p0: WORKSPACE_MEMBER_ID },
+        sql: '"opportunity"."ownerId" = :onema_0_opportunity_p0',
+        parameters: { onema_0_opportunity_p0: WORKSPACE_MEMBER_ID },
       },
     });
   });
@@ -197,8 +200,8 @@ describe('compileOnemaRowAccess', () => {
     ).toEqual({
       kind: 'gated',
       condition: {
-        sql: '(("task"."isUrgent" = :onema_task_p0) AND ("task"."projectId" IS NULL))',
-        parameters: { onema_task_p0: true },
+        sql: '(("task"."isUrgent" = :onema_0_task_p0) AND ("task"."projectId" IS NULL))',
+        parameters: { onema_0_task_p0: true },
       },
     });
   });
@@ -239,14 +242,14 @@ describe('compileOnemaRowAccess', () => {
       kind: 'gated',
       condition: {
         sql:
-          '(("project"."projectManagerId" = :onema_project_p0) OR ' +
-          '(EXISTS (SELECT 1 FROM "workspace_test"."_projectMember" AS "onema_project_t1" ' +
-          'WHERE "onema_project_t1"."projectId" = "project"."id" ' +
-          'AND "onema_project_t1"."deletedAt" IS NULL ' +
-          'AND ("onema_project_t1"."memberId" = :onema_project_p2))))',
+          '(("project"."projectManagerId" = :onema_0_project_p0) OR ' +
+          '(EXISTS (SELECT 1 FROM "workspace_test"."_projectMember" AS "onema_0_project_t1" ' +
+          'WHERE "onema_0_project_t1"."projectId" = "project"."id" ' +
+          'AND "onema_0_project_t1"."deletedAt" IS NULL ' +
+          'AND ("onema_0_project_t1"."memberId" = :onema_0_project_p2))))',
         parameters: {
-          onema_project_p0: WORKSPACE_MEMBER_ID,
-          onema_project_p2: WORKSPACE_MEMBER_ID,
+          onema_0_project_p0: WORKSPACE_MEMBER_ID,
+          onema_0_project_p2: WORKSPACE_MEMBER_ID,
         },
       },
     });
@@ -281,11 +284,11 @@ describe('compileOnemaRowAccess', () => {
       kind: 'gated',
       condition: {
         sql:
-          'EXISTS (SELECT 1 FROM "workspace_test"."_project" AS "onema_task_t0" ' +
-          'WHERE "onema_task_t0"."id" = "task"."projectId" ' +
-          'AND "onema_task_t0"."deletedAt" IS NULL ' +
-          'AND ("onema_task_t0"."projectManagerId" = :onema_task_p1))',
-        parameters: { onema_task_p1: WORKSPACE_MEMBER_ID },
+          'EXISTS (SELECT 1 FROM "workspace_test"."_project" AS "onema_0_task_t0" ' +
+          'WHERE "onema_0_task_t0"."id" = "task"."projectId" ' +
+          'AND "onema_0_task_t0"."deletedAt" IS NULL ' +
+          'AND ("onema_0_task_t0"."projectManagerId" = :onema_0_task_p1))',
+        parameters: { onema_0_task_p1: WORKSPACE_MEMBER_ID },
       },
     });
   });
@@ -347,12 +350,80 @@ describe('compileOnemaRowAccess', () => {
       kind: 'gated',
       condition: {
         sql:
-          'EXISTS (SELECT 1 FROM "workspace_test"."_project" AS "onema_task_t0" ' +
-          'WHERE "onema_task_t0"."id" = "task"."projectId" ' +
-          'AND "onema_task_t0"."deletedAt" IS NULL)',
+          'EXISTS (SELECT 1 FROM "workspace_test"."_project" AS "onema_0_task_t0" ' +
+          'WHERE "onema_0_task_t0"."id" = "task"."projectId" ' +
+          'AND "onema_0_task_t0"."deletedAt" IS NULL)',
         parameters: {},
       },
     });
+  });
+
+  // Two aliases sanitize to one name, so without a namespace both would write
+  // :onema_task_owner_p0 and the later setParameters() would overwrite the first
+  it('keeps the parameters of two aliases that sanitize to one name apart', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
+      },
+      subject: salesSubject,
+    });
+    const first = compileOnemaRowAccess({
+      tableShape: opportunityTableShape,
+      tableAlias: 'task-owner',
+      context,
+    });
+    const second = compileOnemaRowAccess({
+      tableShape: opportunityTableShape,
+      tableAlias: 'task_owner',
+      context,
+    });
+
+    expect(
+      first.kind === 'gated' &&
+        second.kind === 'gated' &&
+        Object.keys(first.condition.parameters)[0] !==
+          Object.keys(second.condition.parameters)[0],
+    ).toBe(true);
+  });
+
+  it('denies an exists chain that reaches past the depth limit', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          project: {
+            sales: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: {
+                  exists: {
+                    object: 'task',
+                    backForeignKey: 'project',
+                    where: {
+                      exists: {
+                        object: 'opportunity',
+                        backForeignKey: 'owner',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      subject: salesSubject,
+    });
+
+    expect(
+      compileOnemaRowAccess({
+        tableShape: projectTableShape,
+        tableAlias: 'project',
+        context,
+      }),
+    ).toEqual({ kind: 'denied' });
   });
 
   it('throws on a field no column or relation of the object matches', () => {

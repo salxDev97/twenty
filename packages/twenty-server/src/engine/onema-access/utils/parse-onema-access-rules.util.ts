@@ -1,6 +1,9 @@
 import { isDefined } from 'twenty-shared/utils';
 
-import { ONEMA_MAX_RULE_DEPTH } from 'src/engine/onema-access/constants/onema-access.constants';
+import {
+  ONEMA_MAX_CONDITIONS_PER_RULE,
+  ONEMA_MAX_RULE_DEPTH,
+} from 'src/engine/onema-access/constants/onema-access.constants';
 import {
   OnemaAccessException,
   OnemaAccessExceptionCode,
@@ -29,7 +32,7 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
 
   validateRoleIdentifiersAreUnique(rules);
   validateRoleKeysAreDeclared(rules);
-  validateParentChains(rules);
+  validateObjectChains(rules);
 
   return rules;
 };
@@ -77,7 +80,10 @@ const validateRoleKeysAreDeclared = (rules: OnemaAccessRules): void => {
   }
 };
 
-const validateParentChains = (rules: OnemaAccessRules): void => {
+// Every object chain of the file is walked statically: each rule becomes one
+// correlated subquery per hop, so an unbounded chain is a way to make the
+// database do unbounded work on every row of every query
+const validateObjectChains = (rules: OnemaAccessRules): void => {
   for (const [objectName, conditionByRoleKey] of Object.entries(
     rules.objects,
   )) {
@@ -88,77 +94,116 @@ const validateParentChains = (rules: OnemaAccessRules): void => {
 
       walkCondition({
         condition,
-        objectName,
         roleKey,
         rules,
         objectPath: [objectName],
+        budget: { remainingConditions: ONEMA_MAX_CONDITIONS_PER_RULE },
+        describeRule: `"${objectName}" and role "${roleKey}"`,
       });
     }
   }
 };
 
+type ConditionBudget = { remainingConditions: number };
+
 const walkCondition = ({
   condition,
-  objectName,
   roleKey,
   rules,
   objectPath,
+  budget,
+  describeRule,
 }: {
   condition: OnemaCondition;
-  objectName: string;
   roleKey: string;
   rules: OnemaAccessRules;
   objectPath: string[];
+  budget: ConditionBudget;
+  describeRule: string;
 }): void => {
+  budget.remainingConditions -= 1;
+
+  if (budget.remainingConditions < 0) {
+    throw new OnemaAccessException(
+      `Onema access rules use more than ${ONEMA_MAX_CONDITIONS_PER_RULE} conditions for object ${describeRule}`,
+      OnemaAccessExceptionCode.INVALID_RULES,
+    );
+  }
+
   if ('and' in condition || 'or' in condition) {
     const operands = 'and' in condition ? condition.and : condition.or;
 
     for (const operand of operands) {
       walkCondition({
         condition: operand,
-        objectName,
         roleKey,
         rules,
         objectPath,
+        budget,
+        describeRule,
       });
     }
 
     return;
   }
 
-  if ('exists' in condition && isDefined(condition.exists.where)) {
-    walkCondition({
-      condition: condition.exists.where,
+  // The target of an exists is one more object on the chain, like the target of
+  // a parent: a chain of nested exists, or a mixed exists → parent → exists one,
+  // has to answer to the same depth and cycle limits
+  if ('exists' in condition) {
+    const nextObjectPath = enterObject({
       objectName: condition.exists.object,
       roleKey,
-      rules,
       objectPath,
     });
+
+    if (isDefined(condition.exists.where)) {
+      walkCondition({
+        condition: condition.exists.where,
+        roleKey,
+        rules,
+        objectPath: nextObjectPath,
+        budget,
+        describeRule,
+      });
+    }
 
     return;
   }
 
   if ('parent' in condition) {
-    enterParentObject({
-      objectName: condition.parent.object,
+    const parentObjectName = condition.parent.object;
+    const nextObjectPath = enterObject({
+      objectName: parentObjectName,
+      roleKey,
+      objectPath,
+    });
+    const parentCondition = rules.objects[parentObjectName]?.[roleKey];
+
+    if (!isDefined(parentCondition)) {
+      return;
+    }
+
+    walkCondition({
+      condition: parentCondition,
       roleKey,
       rules,
-      objectPath,
+      objectPath: nextObjectPath,
+      budget,
+      describeRule,
     });
   }
 };
 
-const enterParentObject = ({
+const enterObject = ({
   objectName,
   roleKey,
-  rules,
   objectPath,
 }: {
   objectName: string;
   roleKey: string;
-  rules: OnemaAccessRules;
   objectPath: string[];
-}): void => {
+}): string[] => {
   if (objectPath.includes(objectName)) {
     throw new OnemaAccessException(
       `Onema access rules form a cycle for role "${roleKey}": ${[
@@ -180,17 +225,5 @@ const enterParentObject = ({
     );
   }
 
-  const parentCondition = rules.objects[objectName]?.[roleKey];
-
-  if (!isDefined(parentCondition)) {
-    return;
-  }
-
-  walkCondition({
-    condition: parentCondition,
-    objectName,
-    roleKey,
-    rules,
-    objectPath: nextObjectPath,
-  });
+  return nextObjectPath;
 };

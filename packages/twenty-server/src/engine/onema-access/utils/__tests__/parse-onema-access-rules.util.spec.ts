@@ -89,6 +89,98 @@ describe('parseOnemaAccessRules', () => {
     ).toThrow(/cycle/);
   });
 
+  it('rejects a chain of nested exists deeper than three objects', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: {
+          project: {
+            sales: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: {
+                  exists: {
+                    object: 'projectMemberShare',
+                    backForeignKey: 'projectMember',
+                    where: {
+                      exists: {
+                        object: 'projectMemberShareGrant',
+                        backForeignKey: 'projectMemberShare',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(/nest deeper/);
+  });
+
+  it('rejects a mixed exists and parent chain past the same limit', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: {
+          dataRoomItem: {
+            sales: {
+              exists: {
+                object: 'dataRoomShare',
+                backForeignKey: 'dataRoomItem',
+                where: { parent: { foreignKey: 'project', object: 'project' } },
+              },
+            },
+          },
+          project: {
+            sales: {
+              parent: { foreignKey: 'opportunity', object: 'opportunity' },
+            },
+          },
+        },
+      }),
+    ).toThrow(/nest deeper/);
+  });
+
+  it('rejects an exists chain that comes back to an object it already joined', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: {
+          project: {
+            sales: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: {
+                  exists: { object: 'project', backForeignKey: 'project' },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(/cycle/);
+  });
+
+  it('rejects a rule built from more conditions than the limit allows', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: {
+          opportunity: {
+            sales: {
+              or: Array.from({ length: 64 }, (_unused, index) => ({
+                eq: ['stage', `stage-${index}`],
+              })),
+            },
+          },
+        },
+      }),
+    ).toThrow(/more than 32 conditions/);
+  });
+
   it('rejects a parent chain deeper than three objects', () => {
     expect(() =>
       parseOnemaAccessRules({
