@@ -376,7 +376,34 @@
     "projectMember": [{ "foreignKey": "project", "object": "project" }],
     "clientAccess": [{ "foreignKey": "project", "object": "project" }],
     "task": [{ "foreignKey": "project", "object": "project" }],
-    "dataRoomItem": [{ "foreignKey": "project", "object": "project" }]
+    "dataRoomItem": [{ "foreignKey": "project", "object": "project" }],
+    "attachment": [
+      { "foreignKey": "targetOpportunity", "object": "opportunity" },
+      { "foreignKey": "targetCompany", "object": "company" },
+      { "foreignKey": "targetPerson", "object": "person" },
+      { "foreignKey": "targetTask", "object": "task" },
+      { "foreignKey": "targetNote", "object": "note" }
+    ],
+    "noteTarget": [
+      { "foreignKey": "targetOpportunity", "object": "opportunity" }
+    ],
+    "taskTarget": [
+      { "foreignKey": "task", "object": "task" },
+      { "foreignKey": "targetOpportunity", "object": "opportunity" },
+      { "foreignKey": "targetCompany", "object": "company" },
+      { "foreignKey": "targetPerson", "object": "person" }
+    ],
+    "timelineActivity": [
+      { "foreignKey": "targetOpportunity", "object": "opportunity" },
+      { "foreignKey": "targetCompany", "object": "company" },
+      { "foreignKey": "targetPerson", "object": "person" },
+      { "foreignKey": "targetTask", "object": "task" },
+      { "foreignKey": "targetNote", "object": "note" }
+    ],
+    "onemaApprovalDecisionRecord": [
+      { "foreignKey": "task", "object": "task" },
+      { "foreignKey": "opportunity", "object": "opportunity" }
+    ]
   },
   "ownerDefaults": {
     "opportunity": { "sales": "owner" },

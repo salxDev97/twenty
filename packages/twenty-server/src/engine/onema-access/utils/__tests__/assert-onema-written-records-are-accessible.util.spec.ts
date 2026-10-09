@@ -11,7 +11,10 @@ import {
 import { buildTestTableShape } from 'src/engine/onema-access/__tests__/utils/build-test-table-shape.util';
 import { ONEMA_RECORD_ID_BATCH_SIZE } from 'src/engine/onema-access/constants/onema-access.constants';
 import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
-import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
+import {
+  assertOnemaWrittenRecordsAreAccessible,
+  type OnemaRawQueryExecutor,
+} from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
 import { resetOnemaParameterNamespaceForTesting } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import { setOnemaAccessRulesForTesting } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
 import { type MutationKind } from 'src/engine/twenty-orm/sql/utils/build-mutation-statement.util';
@@ -394,6 +397,205 @@ describe('assertOnemaWrittenRecordsAreAccessible', () => {
       ).rejects.toThrow(
         /membership-1 hang on a record their author may not see/,
       );
+    });
+  });
+
+  // ONE-112. The two checks of this function meet the polymorphic conditions
+  // from opposite sides: the row is read back under its own `anyParent` rule,
+  // and the links the file declares are the write side of that same rule.
+  describe('a record whose parent is polymorphic', () => {
+    const opportunityTableShape = buildTestTableShape({
+      nameSingular: 'opportunity',
+      joinColumnNameByFieldName: { owner: 'ownerId' },
+    });
+    const companyTableShape = buildTestTableShape({
+      nameSingular: 'company',
+      joinColumnNameByFieldName: { parentOpportunity: 'parentOpportunityId' },
+      relationTargetByFieldName: { parentOpportunity: 'opportunity' },
+    });
+    const personTableShape = buildTestTableShape({
+      nameSingular: 'person',
+      joinColumnNameByFieldName: { company: 'companyId' },
+      relationTargetByFieldName: { company: 'company' },
+    });
+    const attachmentTableShape = buildTestTableShape({
+      nameSingular: 'attachment',
+      joinColumnNameByFieldName: {
+        targetOpportunity: 'targetOpportunityId',
+        targetPerson: 'targetPersonId',
+      },
+      relationTargetByFieldName: {
+        targetOpportunity: 'opportunity',
+        targetPerson: 'person',
+      },
+    });
+    const taskTargetTableShape = buildTestTableShape({
+      nameSingular: 'taskTarget',
+      joinColumnNameByFieldName: {
+        task: 'taskId',
+        targetOpportunity: 'targetOpportunityId',
+      },
+      relationTargetByFieldName: {
+        task: 'task',
+        targetOpportunity: 'opportunity',
+      },
+    });
+
+    const polymorphicTableShapes = [
+      opportunityTableShape,
+      companyTableShape,
+      personTableShape,
+      attachmentTableShape,
+      taskTargetTableShape,
+      taskTableShape,
+      projectTableShape,
+    ];
+
+    // attachment → person → company → opportunity: four objects, which only the
+    // polymorphic budget allows
+    const attachmentFollowsItsTargetRules: OnemaAccessRules = {
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: {
+        opportunity: { sales: { eq: ['owner', '$me'] } },
+        company: {
+          sales: {
+            parent: { foreignKey: 'parentOpportunity', object: 'opportunity' },
+          },
+        },
+        person: {
+          sales: { parent: { foreignKey: 'company', object: 'company' } },
+        },
+        attachment: {
+          sales: {
+            anyParent: {
+              parents: [
+                { foreignKey: 'targetOpportunity', object: 'opportunity' },
+                { foreignKey: 'targetPerson', object: 'person' },
+              ],
+            },
+          },
+        },
+      },
+      writeRequiresParentAccess: {
+        attachment: [
+          { foreignKey: 'targetOpportunity', object: 'opportunity' },
+          { foreignKey: 'targetPerson', object: 'person' },
+        ],
+      },
+    };
+
+    const assertAttachmentAccessible = (executeRaw: OnemaRawQueryExecutor) =>
+      assertOnemaWrittenRecordsAreAccessible({
+        scope: buildTestAccessScope({
+          tableShape: attachmentTableShape,
+          tableShapes: polymorphicTableShapes,
+        }),
+        writtenRecords: [{ id: 'attachment-1' }],
+        returningColumns: ['id'],
+        mutationKind: 'insert',
+        executeRaw,
+      });
+
+    it('reads a polymorphic record back under its own anyParent rule', async () => {
+      setOnemaAccessRulesForTesting(attachmentFollowsItsTargetRules);
+
+      const executeRaw = buildExecuteRaw(['attachment-1']);
+
+      await assertAttachmentAccessible(executeRaw);
+
+      const [visibilitySql] = executeRaw.mock.calls[0] as unknown as [string];
+
+      expect(visibilitySql).toContain('FROM "workspace_test"."_opportunity"');
+      expect(visibilitySql).toContain('FROM "workspace_test"."_person"');
+      expect(visibilitySql).toContain(' OR ');
+    });
+
+    // The depth is the point: the declared links are the same polymorphic hop
+    // the rule takes, so they get the same budget. Compiled at the plain limit,
+    // the person branch would come back `denied` and turn into
+    // "targetPersonId IS NULL" — a file may never be attached to a contact.
+    it('lets the declared links reach as far as the rule they mirror', async () => {
+      setOnemaAccessRulesForTesting(attachmentFollowsItsTargetRules);
+
+      const executeRaw = buildExecuteRaw(['attachment-1']);
+
+      await assertAttachmentAccessible(executeRaw);
+
+      const [parentSql] = executeRaw.mock.calls[1] as unknown as [string];
+
+      expect(parentSql).toContain('"attachment"."targetPersonId" IS NULL OR');
+      expect(parentSql).toContain('FROM "workspace_test"."_company"');
+      expect(parentSql).toContain(' AND ');
+    });
+
+    it('refuses an attachment hung on a contact its author may not see', async () => {
+      setOnemaAccessRulesForTesting(attachmentFollowsItsTargetRules);
+
+      // Visible to its author — the first pass admits it — and still hung on
+      // somebody else's record, which only the second pass can say
+      const executeRaw = jest
+        .fn<Promise<Record<string, unknown>[]>, unknown[]>()
+        .mockResolvedValueOnce([{ id: 'attachment-1' }])
+        .mockResolvedValueOnce([]);
+
+      await expect(assertAttachmentAccessible(executeRaw)).rejects.toThrow(
+        /attachment-1 hang on a record their author may not see/,
+      );
+    });
+
+    // The target row names two parents of different kinds: the record it points
+    // at, which its own rule reads, and the task it drags along, which no rule
+    // of `taskTarget` ever looks at
+    it('refuses a target row that drags in a task its author may not see', async () => {
+      setOnemaAccessRulesForTesting({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: {
+          opportunity: { sales: { eq: ['owner', '$me'] } },
+          project: { sales: { eq: ['projectManager', '$me'] } },
+          task: {
+            sales: { parent: { foreignKey: 'project', object: 'project' } },
+          },
+          taskTarget: {
+            sales: {
+              anyParent: {
+                parents: [
+                  { foreignKey: 'targetOpportunity', object: 'opportunity' },
+                ],
+              },
+            },
+          },
+        },
+        writeRequiresParentAccess: {
+          taskTarget: [
+            { foreignKey: 'task', object: 'task' },
+            { foreignKey: 'targetOpportunity', object: 'opportunity' },
+          ],
+        },
+      });
+
+      const executeRaw = jest
+        .fn<Promise<Record<string, unknown>[]>, unknown[]>()
+        .mockResolvedValueOnce([{ id: 'task-target-1' }])
+        .mockResolvedValueOnce([]);
+
+      await expect(
+        assertOnemaWrittenRecordsAreAccessible({
+          scope: buildTestAccessScope({
+            tableShape: taskTargetTableShape,
+            tableShapes: polymorphicTableShapes,
+          }),
+          writtenRecords: [{ id: 'task-target-1' }],
+          returningColumns: ['id'],
+          mutationKind: 'insert',
+          executeRaw,
+        }),
+      ).rejects.toThrow(
+        /task-target-1 hang on a record their author may not see/,
+      );
+
+      const [parentSql] = executeRaw.mock.calls[1] as unknown as [string];
+
+      expect(parentSql).toContain('FROM "workspace_test"."_task"');
     });
   });
 

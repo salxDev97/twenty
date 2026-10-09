@@ -14,6 +14,7 @@ import {
   type OnemaCondition,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { closesOnemaRuleCycle } from 'src/engine/onema-access/utils/closes-onema-rule-cycle.util';
+import { isOnemaPolymorphicParentSet } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import { onemaAccessRulesSchema } from 'src/engine/onema-access/utils/onema-access-rules.schema';
 
 const CURRENT_MEMBER_TOKEN = '$me';
@@ -285,19 +286,27 @@ const validateObjectChains = (rules: OnemaAccessRules): void => {
 // `denied` at compile time, and a silent `denied` on a write-parent check reads
 // as "this foreign key must stay empty" — the author is told their row may hang
 // on nothing at all. The walk makes it a refusal of the file instead.
+//
+// Several links on one object are a polymorphic set and get the budget their
+// `anyParent` would get, exactly as the compiler gives it
+// (isOnemaPolymorphicParentSet in compile-onema-row-access.util.ts).
 const validateWriteParentChains = (rules: OnemaAccessRules): void => {
   for (const [objectName, parents] of Object.entries(
     rules.writeRequiresParentAccess ?? {},
   )) {
+    const chain: ObjectChain = {
+      objectPath: [objectName],
+      maxObjectDepth: isOnemaPolymorphicParentSet(parents)
+        ? ONEMA_MAX_RULE_DEPTH_THROUGH_POLYMORPHIC_TARGET
+        : ONEMA_MAX_RULE_DEPTH,
+      cycleExemptObjectName: objectName,
+    };
+
     for (const parent of parents) {
       walkTarget({
         objectName: parent.object,
         rules,
-        chain: {
-          objectPath: [objectName],
-          maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
-          cycleExemptObjectName: objectName,
-        },
+        chain,
         budget: { remainingConditions: ONEMA_MAX_CONDITIONS_PER_RULE },
         describeRule: `"${objectName}" and its writeRequiresParentAccess link "${parent.foreignKey}"`,
       });

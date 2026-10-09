@@ -124,6 +124,13 @@ export const compileOnemaRowAccess = ({
 // So the parent named by each declared foreign key has to be admitted by its own
 // rule, for the same author, in the same transaction. A row that names no parent
 // grants nobody anything and is left alone.
+//
+// Several declared links are a polymorphic set — `attachment` names five
+// `target*` keys of which at most one is filled — so the AND here is the write
+// side of `anyParent`'s OR, hop for hop, and it is given the same depth budget
+// (ONE-112). Without that, `attachment → person → company → opportunity` would
+// be refused one object short of the very rule it mirrors, and the refusal
+// would read as "you may never attach a file to a contact".
 export const compileOnemaWriteParentAccess = ({
   tableShape,
   tableAlias,
@@ -147,6 +154,7 @@ export const compileOnemaWriteParentAccess = ({
     nextIndex: 0,
     cycleExemptObjectName: tableShape.nameSingular,
   };
+  const chain = buildWriteParentChain({ tableShape, parents });
 
   return combineRowAccess(
     parents.map((parent) => {
@@ -158,10 +166,7 @@ export const compileOnemaWriteParentAccess = ({
         condition: { parent },
         tableShape,
         tableAlias,
-        chain: {
-          objectPath: [tableShape.nameSingular],
-          maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
-        },
+        chain,
         state,
       });
 
@@ -787,6 +792,32 @@ const widenChainForPolymorphicTarget = (chain: ObjectChain): ObjectChain => ({
     ONEMA_MAX_RULE_DEPTH_THROUGH_POLYMORPHIC_TARGET,
   ),
 });
+
+// One declared link is a plain foreign key and keeps the plain limit; more than
+// one is the polymorphic set the object's own `anyParent` walks, and gets the
+// budget that rule would get. The rule is stated once here and mirrored by the
+// loader (parse-onema-access-rules.util.ts), so a write-parent link the loader
+// accepts is one the compiler can build.
+export const isOnemaPolymorphicParentSet = (
+  parents: OnemaParentCondition[],
+): boolean => parents.length > 1;
+
+const buildWriteParentChain = ({
+  tableShape,
+  parents,
+}: {
+  tableShape: WorkspaceTableShape;
+  parents: OnemaParentCondition[];
+}): ObjectChain => {
+  const chain: ObjectChain = {
+    objectPath: [tableShape.nameSingular],
+    maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
+  };
+
+  return isOnemaPolymorphicParentSet(parents)
+    ? widenChainForPolymorphicTarget(chain)
+    : chain;
+};
 
 const quoteColumn = (alias: string, columnName: string): string =>
   `${escapeIdentifier(alias)}.${escapeIdentifier(columnName)}`;

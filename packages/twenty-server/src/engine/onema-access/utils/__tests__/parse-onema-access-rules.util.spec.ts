@@ -445,6 +445,7 @@ describe('parseOnemaAccessRules', () => {
       requiredObjects: [],
       writeProtectedFields: {},
       freezeWhen: {},
+      writeRequiresParentAccess: {},
       objects: {
         attachment: {
           sales: {
@@ -475,6 +476,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeRequiresParentAccess: {},
         objects: {
           attachment: {
             sales: {
@@ -509,6 +511,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeRequiresParentAccess: {},
         objects: {
           attachment: {
             sales: {
@@ -533,6 +536,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeRequiresParentAccess: {},
         objects: {
           timelineActivity: {
             sales: {
@@ -556,6 +560,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeRequiresParentAccess: {},
         objects: {
           note: {
             sales: {
@@ -574,6 +579,109 @@ describe('parseOnemaAccessRules', () => {
         },
       }),
     ).toThrow(/cycle/);
+  });
+
+  // A Б5 link compiles into the same joins as a rule, and until ONE-112 the
+  // loader walked none of them: a link past the limit became a silent `denied`,
+  // which on the write side reads as "this foreign key must stay empty"
+  it('rejects a write-parent link whose chain reaches past the limit', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {},
+        objects: {
+          note: {
+            sales: { parent: { foreignKey: 'person', object: 'person' } },
+          },
+          person: {
+            sales: { parent: { foreignKey: 'company', object: 'company' } },
+          },
+          company: {
+            sales: {
+              parent: { foreignKey: 'opportunity', object: 'opportunity' },
+            },
+          },
+          opportunity: { sales: { eq: ['owner', '$me'] } },
+        },
+        writeRequiresParentAccess: {
+          attachment: [{ foreignKey: 'targetNote', object: 'note' }],
+        },
+      }),
+    ).toThrow(/nest deeper/);
+  });
+
+  // Several links on one object are the polymorphic set the object's own
+  // anyParent walks, so they get the budget that rule would get
+  it('accepts a polymorphic write-parent set one object deeper than a single link', () => {
+    const objects = {
+      person: {
+        sales: { parent: { foreignKey: 'company', object: 'company' } },
+      },
+      company: {
+        sales: { parent: { foreignKey: 'opportunity', object: 'opportunity' } },
+      },
+      opportunity: { sales: { eq: ['owner', '$me'] } },
+    };
+    const baseRules = {
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      freezeWhen: {},
+      objects,
+    };
+
+    expect(
+      parseOnemaAccessRules({
+        ...baseRules,
+        writeRequiresParentAccess: {
+          attachment: [
+            { foreignKey: 'targetOpportunity', object: 'opportunity' },
+            { foreignKey: 'targetPerson', object: 'person' },
+          ],
+        },
+      }),
+    ).toBeDefined();
+
+    expect(() =>
+      parseOnemaAccessRules({
+        ...baseRules,
+        writeRequiresParentAccess: {
+          attachment: [{ foreignKey: 'targetPerson', object: 'person' }],
+        },
+      }),
+    ).toThrow(/nest deeper/);
+  });
+
+  // A write-parent chain starts at the row being written, not at a rule, so the
+  // parent's rule reaching that object again reads other rows of it and stops.
+  // `projectMember -> project -> projectMember` is how a contractor sees the
+  // project at all; refusing it as a cycle would take away the membership they
+  // are entitled to create.
+  it('lets a write-parent chain come back to the object being written', () => {
+    expect(
+      parseOnemaAccessRules({
+        roles: { contractor: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {},
+        objects: {
+          project: {
+            contractor: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: { eq: ['member', '$me'] },
+              },
+            },
+          },
+        },
+        writeRequiresParentAccess: {
+          projectMember: [{ foreignKey: 'project', object: 'project' }],
+        },
+      }),
+    ).toBeDefined();
   });
 
   it('accepts protected fields and a freeze rule', () => {
