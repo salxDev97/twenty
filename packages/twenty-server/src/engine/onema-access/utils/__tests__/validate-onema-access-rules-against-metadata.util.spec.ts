@@ -396,4 +396,61 @@ describe('validateOnemaAccessRulesAgainstMetadata', () => {
       validation.kind === 'invalid' && validation.problems.join('; '),
     ).toMatch(/freezeWhen: "onemaStage" is no single-column field/);
   });
+
+  it('accepts a transition graph naming a real single-column field', () => {
+    expect(
+      validate({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { task: { sales: { all: true } } },
+        transitions: {
+          task: {
+            field: 'id',
+            rules: [{ from: null, to: ['DRAFT'], roleKeys: ['sales'] }],
+          },
+        },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  it('rejects a transition graph naming an object this workspace does not have', () => {
+    const validation = validate({
+      application: 'onema-application',
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { task: { sales: { all: true } } },
+      transitions: {
+        onemaEstimate: {
+          field: 'status',
+          rules: [{ from: null, to: ['DRAFT'], roleKeys: ['sales'] }],
+        },
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(
+      /transitions names no object of this workspace \("onemaEstimate"\)/,
+    );
+  });
+
+  // A composite field has no single stored value a graph edge could compare
+  it('rejects a transition graph naming a field this workspace does not have', () => {
+    const validation = validate({
+      application: 'onema-application',
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { task: { sales: { all: true } } },
+      transitions: {
+        task: {
+          field: 'onemaStage',
+          rules: [{ from: null, to: ['DRAFT'], roleKeys: ['sales'] }],
+        },
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(/transitions: "onemaStage" is no single-column field of "task"/);
+  });
 });

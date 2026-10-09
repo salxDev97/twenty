@@ -27,6 +27,7 @@ const validRules: OnemaAccessRules = {
   writeProtectedFields: {},
   writeRequiresParentAccess: {},
   freezeWhen: {},
+  transitions: {},
 };
 
 const testingOverridePath = path.join(
@@ -75,6 +76,7 @@ describe('getOnemaAccessRulesState', () => {
         writeProtectedFields: rules.writeProtectedFields ?? {},
         writeRequiresParentAccess: rules.writeRequiresParentAccess ?? {},
         freezeWhen: rules.freezeWhen ?? {},
+        transitions: rules.transitions ?? {},
       }),
     );
   };
@@ -130,6 +132,7 @@ describe('getOnemaAccessRulesState', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
       }),
     );
 

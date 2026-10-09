@@ -29,8 +29,9 @@ import { applyOnemaRowAccess } from 'src/engine/onema-access/utils/apply-onema-r
 import { assertOnemaRawSqlIsPermitted } from 'src/engine/onema-access/utils/assert-onema-raw-sql-is-permitted.util';
 import { assertOnemaFrozenFieldsAreUnchanged } from 'src/engine/onema-access/utils/assert-onema-frozen-fields-are-unchanged.util';
 import { assertOnemaProtectedFieldsAreWritable } from 'src/engine/onema-access/utils/assert-onema-protected-fields-are-writable.util';
+import { assertOnemaTransitionIsPermitted } from 'src/engine/onema-access/utils/assert-onema-transition-is-permitted.util';
 import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
-import { lockOnemaFrozenRecordsForUpdate } from 'src/engine/onema-access/utils/lock-onema-frozen-records.util';
+import { lockOnemaGuardedRecordsForUpdate } from 'src/engine/onema-access/utils/lock-onema-guarded-records.util';
 import { buildOnemaAccessSubject } from 'src/engine/onema-access/utils/resolve-onema-access-subject.util';
 import { resolveOnemaVisibleRecordIds } from 'src/engine/onema-access/utils/resolve-onema-visible-record-ids.util';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
@@ -1186,6 +1187,18 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       ? this.buildInsertRows(onemaOwnedRecords)
       : insertRows;
 
+    // Onema fork (ADR-003), rls-design §12а Т-3/Т-7 (hardening.md п. 3): a
+    // record cannot be created already in a state the graph only reaches by a
+    // transition — there is no row to lock yet, so `from` is read as the
+    // graph's own `null`, the state nothing has written yet
+    assertOnemaTransitionIsPermitted({
+      scope: this.onemaAccessScope,
+      updates: formattedRecords.map((setColumns) => ({
+        rawRecordBefore: undefined,
+        setColumns,
+      })),
+    });
+
     validateRLSPredicatesForRecords({
       records: this.formatResult<ObjectRecord[]>(formattedRecords),
       objectMetadata: this.options.flatObjectMetadata,
@@ -1362,8 +1375,8 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
         })),
     );
 
-    // Onema fork (ADR-003), rls-design §12а Т-2
-    await this.assertOnemaFrozenFieldsAreUnchangedUnderLock(
+    // Onema fork (ADR-003), rls-design §12а Т-2/Т-3/Т-7 (hardening.md п. 3–5)
+    await this.assertOnemaWriteInvariantsAreSatisfiedUnderLock(
       updatesWithRecordBefore,
     );
 
@@ -1870,19 +1883,21 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       setColumns = columns;
     }
 
-    // Onema fork (ADR-003), rls-design §12а Т-2. Every kind that writes columns
-    // goes through the freeze, not the update alone: putting a frozen record
-    // away and bringing it back are writes on `deletedAt`, and a rule that
-    // freezes that field means the record may not leave the state it reached.
-    const onemaFrozenSetColumns = isDefined(setColumns)
+    // Onema fork (ADR-003), rls-design §12а Т-2/Т-3/Т-7. Every kind that
+    // writes columns goes through the freeze and the transition graph, not
+    // the update alone: putting a frozen or status-gated record away and
+    // bringing it back are writes on `deletedAt`, and a rule that names that
+    // field means the record may not leave the state it reached, or the soft
+    // delete/restore is itself a status move the graph has an opinion on.
+    const onemaGuardedSetColumns = isDefined(setColumns)
       ? setColumns
       : onemaDeletedAtColumns;
 
-    if (isDefined(onemaFrozenSetColumns)) {
-      await this.assertOnemaFrozenFieldsAreUnchangedUnderLock(
+    if (isDefined(onemaGuardedSetColumns)) {
+      await this.assertOnemaWriteInvariantsAreSatisfiedUnderLock(
         recordsBefore.map((rawRecordBefore) => ({
           rawRecordBefore,
-          setColumns: onemaFrozenSetColumns,
+          setColumns: onemaGuardedSetColumns,
         })),
       );
     }
@@ -2345,17 +2360,20 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     applyOnemaRowAccess({ queryBuilder, scope: this.onemaAccessScope });
   }
 
-  // Onema fork (ADR-003), rls-design §12а Т-2. The rows are locked in the
-  // transaction that is about to write them, and the freeze compares the state
-  // read under that lock rather than the snapshot taken before it: two
-  // concurrent writers would otherwise both see a record that is not frozen yet
-  private async assertOnemaFrozenFieldsAreUnchangedUnderLock(
+  // Onema fork (ADR-003), rls-design §12а Т-2/Т-3/Т-7 (hardening.md п. 3–5).
+  // The rows are locked in the transaction that is about to write them, and
+  // both the freeze and the transition graph compare the state read under
+  // that lock rather than the snapshot taken before it: two concurrent
+  // writers would otherwise both see a record that is not frozen yet, or
+  // both decide the same status jump is still reachable from a row the other
+  // one is about to move away from.
+  private async assertOnemaWriteInvariantsAreSatisfiedUnderLock(
     updates: {
       rawRecordBefore: ObjectRecord;
       setColumns: Record<string, unknown>;
     }[],
   ): Promise<void> {
-    const lockedRecordsById = await lockOnemaFrozenRecordsForUpdate({
+    const lockedRecordsById = await lockOnemaGuardedRecordsForUpdate({
       scope: this.onemaAccessScope,
       recordIds: updates
         .map(({ rawRecordBefore }) => String(rawRecordBefore.id))
@@ -2363,19 +2381,26 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       executeRaw: (sql, parameters) => this.executeRaw(sql, parameters),
     });
 
+    const lockedUpdates = updates.map(({ rawRecordBefore, setColumns }) => ({
+      // A row the lock did not return is a row this transaction does not hold:
+      // deleted by a concurrent writer, or never there. Comparing the
+      // unlocked snapshot instead is the race the lock exists for, so the
+      // write is refused rather than decided on a pre-image nothing pins.
+      rawRecordBefore: isDefined(lockedRecordsById)
+        ? (lockedRecordsById.get(String(rawRecordBefore.id)) ??
+          this.throwOnemaUnlockedRecord(String(rawRecordBefore.id)))
+        : rawRecordBefore,
+      setColumns,
+    }));
+
     assertOnemaFrozenFieldsAreUnchanged({
       scope: this.onemaAccessScope,
-      updates: updates.map(({ rawRecordBefore, setColumns }) => ({
-        // A row the lock did not return is a row this transaction does not hold:
-        // deleted by a concurrent writer, or never there. Comparing the
-        // unlocked snapshot instead is the race the lock exists for, so the
-        // write is refused rather than decided on a pre-image nothing pins.
-        rawRecordBefore: isDefined(lockedRecordsById)
-          ? (lockedRecordsById.get(String(rawRecordBefore.id)) ??
-            this.throwOnemaUnlockedRecord(String(rawRecordBefore.id)))
-          : rawRecordBefore,
-        setColumns,
-      })),
+      updates: lockedUpdates,
+    });
+
+    assertOnemaTransitionIsPermitted({
+      scope: this.onemaAccessScope,
+      updates: lockedUpdates,
     });
   }
 

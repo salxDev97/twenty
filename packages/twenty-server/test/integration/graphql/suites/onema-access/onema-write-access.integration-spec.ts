@@ -1575,4 +1575,143 @@ describe('onemaWriteAccess', () => {
       expect(await readPersonCompanyId(foreignPersonId)).toBe(foreignCompanyId);
     });
   });
+
+  // hardening.md п. 3 (ONE-114), rls-design §12а Т-3/Т-7. `jobTitle` stands in
+  // for an estimate's status field here, the same way it already stands in
+  // for "DEAL" above (Т-2): the acceptance graph is
+  // DRAFT → IN_REVIEW → CEO_APPROVED → SENT → ACCEPTED, with the three last
+  // steps named to the application alone — this suite's human role can never
+  // reach them, so what it proves is the refusal, not a pass-through it has
+  // no way to perform over REST/GraphQL (the same posture the
+  // writeProtectedFields tests above take for an application-only field).
+  describe('a status field driven by a transition graph', () => {
+    const estimateTransitionRules = (): OnemaAccessRules => ({
+      application: APPLICATION_UNIVERSAL_IDENTIFIER,
+      roles: { member: memberRoleUniversalIdentifier },
+      objects: { person: { member: { all: true } } },
+      transitions: {
+        person: {
+          field: 'jobTitle',
+          rules: [
+            { from: 'DRAFT', to: ['IN_REVIEW'], roleKeys: ['member'] },
+            { from: 'IN_REVIEW', to: ['CEO_APPROVED', 'DRAFT'], roleKeys: [] },
+            { from: 'CEO_APPROVED', to: ['SENT'], roleKeys: [] },
+            { from: 'SENT', to: ['ACCEPTED'], roleKeys: [] },
+          ],
+        },
+      },
+    });
+
+    const setJobTitleAsAdminForTransitions = (jobTitle: string) =>
+      makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle',
+          recordId: ownedPersonId,
+          data: { jobTitle },
+        }),
+      );
+
+    // The task's own example: one PATCH from DRAFT to ACCEPTED must be refused
+    // exactly as a PATCH that goes through REST without the server-side
+    // transition command in front of it would be
+    it('refuses jumping from DRAFT straight to ACCEPTED, skipping every required step', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await setJobTitleAsAdminForTransitions('DRAFT');
+
+      setOnemaAccessRulesForTesting(estimateTransitionRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle',
+            recordId: ownedPersonId,
+            data: { jobTitle: 'ACCEPTED' },
+          }),
+        ),
+      );
+
+      expect(
+        (
+          await readBehindTheRules<SeedPerson>({
+            objectMetadataSingularName: 'person',
+            objectMetadataPluralName: 'people',
+            gqlFields: 'id jobTitle',
+            filter: { id: { eq: ownedPersonId } },
+          })
+        )[0].jobTitle,
+      ).toBe('DRAFT');
+    });
+
+    it('lets the one step the role is named for go through', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await setJobTitleAsAdminForTransitions('DRAFT');
+
+      setOnemaAccessRulesForTesting(estimateTransitionRules());
+
+      const submission = await makeRequestAsJony(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle',
+          recordId: ownedPersonId,
+          data: { jobTitle: 'IN_REVIEW' },
+        }),
+      );
+
+      expect(submission.body.errors).toBeUndefined();
+      expect(submission.body.data.updatePerson.jobTitle).toBe('IN_REVIEW');
+    });
+
+    // The CEO decision is a server-side command (rls-design §12а Т-3), never a
+    // PATCH under a role that merely holds "all" on the object
+    it('refuses a role driving the step the graph hands to the application alone', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await setJobTitleAsAdminForTransitions('IN_REVIEW');
+
+      setOnemaAccessRulesForTesting(estimateTransitionRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle',
+            recordId: ownedPersonId,
+            data: { jobTitle: 'CEO_APPROVED' },
+          }),
+        ),
+      );
+
+      expect(
+        (
+          await readBehindTheRules<SeedPerson>({
+            objectMetadataSingularName: 'person',
+            objectMetadataPluralName: 'people',
+            gqlFields: 'id jobTitle',
+            filter: { id: { eq: ownedPersonId } },
+          })
+        )[0].jobTitle,
+      ).toBe('IN_REVIEW');
+    });
+
+    // A value the graph never names in `from` has no edge at all, which is the
+    // fail-closed default rather than a typo quietly opening every move
+    it('refuses any move out of a status the graph does not know as a starting point', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await setJobTitleAsAdminForTransitions('ACCEPTED');
+
+      setOnemaAccessRulesForTesting(estimateTransitionRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle',
+            recordId: ownedPersonId,
+            data: { jobTitle: 'DRAFT' },
+          }),
+        ),
+      );
+    });
+  });
 });

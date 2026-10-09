@@ -405,6 +405,26 @@
       { "foreignKey": "opportunity", "object": "opportunity" }
     ]
   },
+  "transitions": {
+    "onemaEstimate": {
+      "field": "status",
+      "rules": [
+        {
+          "from": null,
+          "to": ["DRAFT"],
+          "roleKeys": ["sales", "projectManager", "salesHead"]
+        },
+        {
+          "from": "DRAFT",
+          "to": ["IN_REVIEW"],
+          "roleKeys": ["sales", "projectManager", "salesHead"]
+        },
+        { "from": "IN_REVIEW", "to": ["CEO_APPROVED", "DRAFT"], "roleKeys": [] },
+        { "from": "CEO_APPROVED", "to": ["SENT"], "roleKeys": [] },
+        { "from": "SENT", "to": ["ACCEPTED"], "roleKeys": [] }
+      ]
+    }
+  },
   "ownerDefaults": {
     "opportunity": { "sales": "owner" },
     "project": { "sales": "salesOwner", "projectManager": "projectManager" }

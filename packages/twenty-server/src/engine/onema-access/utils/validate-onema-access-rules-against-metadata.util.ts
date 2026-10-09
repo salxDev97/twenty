@@ -143,6 +143,7 @@ const collectProblems = ({
 
   collectWriteProtectedFieldProblems({ rules, metadata, problems });
   collectFreezeRuleProblems({ rules, metadata, problems });
+  collectTransitionRuleProblems({ rules, metadata, problems });
   collectOwnerDefaultProblems({ rules, metadata, problems });
   collectWriteParentProblems({ rules, metadata, problems });
 
@@ -330,6 +331,43 @@ const collectFreezeRuleProblems = ({
           );
         }
       }
+    }
+  }
+};
+
+// A transition field is compared against one stored value the same way a
+// freeze condition is, so it cannot be a composite field either; a mistyped
+// name here would open every status write of the object with no warning
+// beyond this check
+const collectTransitionRuleProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  for (const [objectName, { field }] of Object.entries(
+    rules.transitions ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `transitions names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    if (
+      resolveOnemaFieldColumnNames({ tableShape, fieldName: field }).length !==
+      1
+    ) {
+      problems.push(
+        `transitions: "${field}" is no single-column field of "${objectName}"`,
+      );
     }
   }
 };
