@@ -14,7 +14,43 @@ const AUDITED_RAW_WRITE_FILES = [
 // path never read, so the freeze would compare nothing and the check after the
 // write would never see it. ORM v2 builds `DO NOTHING` only, and this keeps it
 // that way: a DO UPDATE has to come with its own pre-image and post-check.
-const SQL_BUILDER_DIRECTORY = 'engine/twenty-orm/sql';
+//
+// Scanned over the whole server rather than the statement builders alone, which
+// is what the review asked for (Б3): the builders are where the clause belongs,
+// so a DO UPDATE appearing anywhere else is exactly the one worth catching —
+// and widening the scan is what turned up the three below.
+const ON_CONFLICT_DO_UPDATE = /ON\s+CONFLICT\b[\s\S]{0,200}?DO\s+UPDATE\b/i;
+
+// The four that were already there when this check was widened. None of them
+// writes a workspace record through the ORM. A fifth entry means somebody wrote
+// a new upsert, and that is the review this list forces — on a workspace record
+// it must bring its own pre-image and its own check after the write.
+//
+// What a text scan can prove and what it cannot: it sees the SQL this codebase
+// spells out, not the SQL TypeORM generates for a core entity. That is why
+// `WorkspaceScopedRepository` is on the list rather than being made to pass —
+// upstream states in its own header that workspace data goes through
+// `WorkspaceRepository`, which builds `DO NOTHING` and nothing else.
+const ON_CONFLICT_DO_UPDATE_EXEMPT_FILES = [
+  // core."workflowVersion" — the core schema mirror, not a workspace record
+  'engine/core-modules/workflow/services/workflow-version-core-sync.service.ts',
+  // core."keyValuePair" — where the migration command keeps its own cursor
+  'database/commands/agent-history/agent-history-migration-state.service.ts',
+  // Agent history tables, which may live in the workspace schema. A one-off
+  // migration command copying upstream's own bookkeeping, under no rule of the
+  // file and outside every runtime write path.
+  'database/commands/agent-history/agent-history-migration-data.service.ts',
+  // Upstream's own note about TypeORM's upsert, on a repository whose header
+  // says workspace data belongs to WorkspaceRepository instead
+  'engine/twenty-orm/workspace-scoped-repository/workspace-scoped-repository.ts',
+];
+
+// Where a workspace record's own statements are built. The clause has no
+// business here at all, exemptions included.
+const WORKSPACE_RECORD_WRITE_DIRECTORIES = [
+  'engine/twenty-orm/sql/',
+  'engine/twenty-orm/repository/',
+];
 
 const listSourceFiles = (directory: string): string[] =>
   fs
@@ -52,17 +88,60 @@ describe('onema raw write guard', () => {
     );
   });
 
-  it('keeps ON CONFLICT DO UPDATE out of the workspace record statements', () => {
+  it('keeps ON CONFLICT DO UPDATE out of every statement the server builds', () => {
     const offenders = sourceFiles
-      .filter((filePath) =>
-        relativeToSource(filePath).startsWith(SQL_BUILDER_DIRECTORY),
+      .filter(
+        (filePath) =>
+          !ON_CONFLICT_DO_UPDATE_EXEMPT_FILES.includes(
+            relativeToSource(filePath),
+          ),
       )
       .filter((filePath) =>
-        /ON\s+CONFLICT[\s\S]{0,80}?DO\s+UPDATE/i.test(
-          fs.readFileSync(filePath, 'utf-8'),
-        ),
+        ON_CONFLICT_DO_UPDATE.test(fs.readFileSync(filePath, 'utf-8')),
       );
 
     expect(offenders.map(relativeToSource)).toEqual([]);
+  });
+
+  // A stale exemption is a hole that looks like a decision: once a file loses
+  // the clause, its name has to leave the list rather than stand ready for the
+  // next one somebody adds there
+  it('keeps every exempted file to one that still carries the clause', () => {
+    const exemptFilesStillCarryingTheClause =
+      ON_CONFLICT_DO_UPDATE_EXEMPT_FILES.filter((relativePath) =>
+        ON_CONFLICT_DO_UPDATE.test(
+          fs.readFileSync(path.join(SERVER_SOURCE_ROOT, relativePath), 'utf-8'),
+        ),
+      );
+
+    expect(exemptFilesStillCarryingTheClause).toEqual(
+      ON_CONFLICT_DO_UPDATE_EXEMPT_FILES,
+    );
+  });
+
+  it('keeps the clause out of the workspace record write path unconditionally', () => {
+    const offenders = sourceFiles
+      .filter((filePath) =>
+        WORKSPACE_RECORD_WRITE_DIRECTORIES.some((directory) =>
+          relativeToSource(filePath).startsWith(directory),
+        ),
+      )
+      .filter((filePath) =>
+        ON_CONFLICT_DO_UPDATE.test(fs.readFileSync(filePath, 'utf-8')),
+      );
+
+    expect(offenders.map(relativeToSource)).toEqual([]);
+  });
+
+  // A directory that stopped existing would make the check above pass by
+  // scanning nothing
+  it('finds the workspace record write path it scans', () => {
+    for (const directory of WORKSPACE_RECORD_WRITE_DIRECTORIES) {
+      expect(
+        sourceFiles.filter((filePath) =>
+          relativeToSource(filePath).startsWith(directory),
+        ).length,
+      ).toBeGreaterThan(0);
+    }
   });
 });

@@ -694,11 +694,14 @@ describe('onemaWriteAccess', () => {
   // asking is whose record it attached itself to.
   describe('a record whose link decides what else is visible', () => {
     const LINKED_PERSON_JOB_TITLE = 'Onema write access (linked person)';
+    const NESTED_COMPANY_NAME = 'Onema write access (nested company)';
 
+    // Every test of this block leaves behind only rows carrying these two names,
+    // and both are swept here: the order the tests run in decides nothing
     afterEach(async () => {
       setOnemaAccessRulesForTesting(undefined);
 
-      const leftovers = await readBehindTheRules<SeedPerson>({
+      const leftoverPeople = await readBehindTheRules<SeedPerson>({
         objectMetadataSingularName: 'person',
         objectMetadataPluralName: 'people',
         gqlFields: 'id jobTitle',
@@ -707,8 +710,31 @@ describe('onemaWriteAccess', () => {
 
       await destroyFixtureRecords({
         objectMetadataSingularName: 'person',
-        recordIds: leftovers.map((person) => person.id),
+        recordIds: leftoverPeople.map((person) => person.id),
       });
+
+      const leftoverCompanies = await readBehindTheRules<SeedCompany>({
+        objectMetadataSingularName: 'company',
+        objectMetadataPluralName: 'companies',
+        gqlFields: 'id name',
+        filter: { name: { eq: NESTED_COMPANY_NAME } },
+      });
+
+      await destroyFixtureRecords({
+        objectMetadataSingularName: 'company',
+        recordIds: leftoverCompanies.map((company) => company.id),
+      });
+
+      // The patch tests move the shared person, and a test that failed before
+      // its own cleanup would otherwise take every later one with it
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: ownedPersonId,
+          data: { companyId: ownedCompanyId },
+        }),
+      );
     });
 
     it('refuses a record attached to a parent its author may not see', async () => {
@@ -797,6 +823,137 @@ describe('onemaWriteAccess', () => {
           data: { companyId: ownedCompanyId },
         }),
       );
+    });
+
+    // The nested form of the same link, which the review asked for separately:
+    // `company: { connect: { where: { id } } }` sets the same foreign key by a
+    // different road through the API, and a check that only knew about the flat
+    // `companyId` would have been walked straight past.
+    it('refuses a nested connect to a parent its author may not see', async () => {
+      setOnemaAccessRulesForTesting(personGrantsAccessToItsCompanyRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          createOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle',
+            data: {
+              jobTitle: LINKED_PERSON_JOB_TITLE,
+              company: { connect: { where: { id: foreignCompanyId } } },
+            },
+          }),
+        ),
+      );
+
+      expect(
+        await readBehindTheRules<SeedPerson>({
+          objectMetadataSingularName: 'person',
+          objectMetadataPluralName: 'people',
+          gqlFields: 'id jobTitle',
+          filter: { jobTitle: { eq: LINKED_PERSON_JOB_TITLE } },
+        }),
+      ).toEqual([]);
+    });
+
+    it('accepts a nested connect to a parent its author owns', async () => {
+      setOnemaAccessRulesForTesting(personGrantsAccessToItsCompanyRules());
+
+      const creation = await makeRequestAsJony(
+        createOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle company { id }',
+          data: {
+            jobTitle: LINKED_PERSON_JOB_TITLE,
+            company: { connect: { where: { id: ownedCompanyId } } },
+          },
+        }),
+      );
+
+      expect(creation.body.errors).toBeUndefined();
+      expect(creation.body.data.createPerson.company.id).toBe(ownedCompanyId);
+    });
+
+    // The patch form: the same nested shape on an update moves an existing
+    // record onto a foreign parent, which is the grant written sideways
+    it('refuses a nested connect that moves a record onto a foreign parent', async () => {
+      setOnemaAccessRulesForTesting(personGrantsAccessToItsCompanyRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id company { id }',
+            recordId: ownedPersonId,
+            data: { company: { connect: { where: { id: foreignCompanyId } } } },
+          }),
+        ),
+      );
+
+      expect(await readPersonCompanyId(ownedPersonId)).toBe(ownedCompanyId);
+    });
+
+    // `create` makes the parent in the same mutation, so the author owns it by
+    // construction — the owner default fills accountOwner and the link is
+    // legitimate. What matters is that the nested creation goes through the
+    // check rather than around it: the child is admitted because its parent is.
+    it('accepts a nested create of the parent it then hangs on', async () => {
+      setOnemaAccessRulesForTesting(personGrantsAccessToItsCompanyRules());
+
+      const creation = await makeRequestAsJony(
+        createOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle company { id name accountOwner { id } }',
+          data: {
+            jobTitle: LINKED_PERSON_JOB_TITLE,
+            company: { create: { name: NESTED_COMPANY_NAME } },
+          },
+        }),
+      );
+
+      expect(creation.body.errors).toBeUndefined();
+      expect(creation.body.data.createPerson.company.accountOwner.id).toBe(
+        WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+      );
+    });
+
+    // And the same nested create under rules that close `company` to this role
+    // outright: the parent the mutation makes is one its own author may not
+    // see, so the child may not hang on it either
+    it('refuses a nested create of a parent its author would not see', async () => {
+      setOnemaAccessRulesForTesting({
+        roles: { member: memberRoleUniversalIdentifier },
+        objects: { company: { member: { eq: ['accountOwner', null] } } },
+        writeRequiresParentAccess: {
+          person: [{ foreignKey: 'company', object: 'company' }],
+        },
+      });
+
+      expectForbidden(
+        await makeRequestAsJony(
+          createOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle company { id }',
+            data: {
+              jobTitle: LINKED_PERSON_JOB_TITLE,
+              company: {
+                create: {
+                  name: NESTED_COMPANY_NAME,
+                  accountOwnerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+                },
+              },
+            },
+          }),
+        ),
+      );
+
+      expect(
+        await readBehindTheRules<SeedPerson>({
+          objectMetadataSingularName: 'person',
+          objectMetadataPluralName: 'people',
+          gqlFields: 'id jobTitle',
+          filter: { jobTitle: { eq: LINKED_PERSON_JOB_TITLE } },
+        }),
+      ).toEqual([]);
     });
   });
 
