@@ -16,15 +16,19 @@
 хука, полный прогон матрицы rls-design §11), `ONEMA_ACCESS_ENFORCE=1`
 ставится только на стенде.
 
-Два пункта обязательны до включения в проде и числятся за ONE-113 (подробно —
-`docs/onema/handover/2026-10-08-one-110-review-3.md`):
+Два пункта, которые числились за ONE-113 до включения в проде (подробно —
+`docs/onema/handover/2026-10-08-one-110-review-3.md`), закрыты инвентарём ниже
+(«CI-сверка»), и теперь это списки, а не оценки:
 
-1. **Инвентаризация `shouldBypassPermissionChecks`.** Флаг возвращает
-   управление раньше хука и выставлен в 119 файлах `twenty-server/src`. Пока
-   они не перечислены и не разобраны, размер обхода не измерен.
-2. **Lite-контекст.** При `lite: true` `flatRoleMaps` пуст, сверка считает
-   каждую роль несуществующей и ставит `1=0` на всё. Утечки нет, но это тихий
-   полный отказ джобов; все вызовы `lite: true` надо пройти.
+1. **`shouldBypassPermissionChecks`** — 115 файлов вне тестов
+   (`permission-bypass-call-sites.txt`). Обход касается только видимости:
+   инварианты записи (Т-1, Т-2, Б5) и запрет сырого DML под ним остаются.
+2. **Lite-контекст** — 45 файлов (`lite-workspace-context-call-sites.txt`), из
+   них 41 — почта и календарь, которые §12 в v1 выключает, плюс история агента
+   (AI выключен), биллинг и уборка прогонов workflow. При `lite: true`
+   `flatRoleMaps` пуст, сверка считает каждую роль несуществующей и ставит
+   `1=0` на всё: утечки нет, тихий полный отказ есть. Включать правила на
+   объекты, которые пишут эти джобы, нельзя, пока контекст не станет полным.
 
 ## Как встроено в ядро
 
@@ -124,6 +128,45 @@ Fail-closed по цели: каждое пишущее ключевое слов
 `SELECT … FOR UPDATE` и `FOR SHARE` разрешены: заморозка так и читает строку,
 которую сравнивает. Чтение не ограничивается — предикат на сыром `SELECT` это
 вопрос ONE-113.
+
+## CI-сверка: инвентарь путей мимо хука
+
+`__tests__/onema-write-path-inventory.spec.ts` держит три списка
+(`__tests__/inventory/*.txt`) — это данные, не код:
+
+| Список | Что в нём | Почему он есть |
+|---|---|---|
+| `raw-sql-runtime-call-sites.txt` | файлы `engine/` и `modules/`, выполняющие запрос напрямую (`.query(`) | сырой оператор не проходит ни одного из пяти хуков |
+| `permission-bypass-call-sites.txt` | `shouldBypassPermissionChecks: true` | единственный доверенный обход видимости; инварианты записи он не выключает |
+| `lite-workspace-context-call-sites.txt` | `lite: true` | в lite-контексте нет карт ролей: правила читают любую роль как несуществующую и закрывают всё — утечки нет, тихий полный отказ есть |
+
+Падение — это не баг, который надо «позеленить». Оно означает, что путь
+добавили, переместили или убрали, и просит то самое ревью, которого больше
+ничто не требует: новый путь записи обязан нести хуки rls-design §3.2–§3.3 и
+§12а либо попасть в список вместе со строкой в хендовере о том, почему он там
+остаётся. Регенерация списка (из `packages/twenty-server/src`):
+
+```bash
+LC_ALL=C grep -rlE --include='*.ts' '\.query[[:space:]]*[<(]' engine modules \
+  | grep -v '\.spec\.ts' | LC_ALL=C sort \
+  > engine/onema-access/__tests__/inventory/raw-sql-runtime-call-sites.txt
+LC_ALL=C grep -rl --include='*.ts' 'shouldBypassPermissionChecks: true' engine modules database \
+  | grep -v '\.spec\.ts' | LC_ALL=C sort \
+  > engine/onema-access/__tests__/inventory/permission-bypass-call-sites.txt
+LC_ALL=C grep -rl --include='*.ts' 'lite: true' engine modules \
+  | grep -v '\.spec\.ts' | LC_ALL=C sort \
+  > engine/onema-access/__tests__/inventory/lite-workspace-context-call-sites.txt
+```
+
+Четвёртая проверка там же отвечает на сам вопрос: **ни один сырой вызов не
+называет таблицу под правилами**. Имена берутся из
+`onema/access-rules.example.json` и ищутся в кавычках — `"company"`,
+`"_company"`, как их пишет `escapeIdentifier`; `objectName: 'company'` внутри
+заготовки workflow таблицей не считается. Таблицу, собранную хелпером, эта
+проверка не видит — её ловит сам инвентарь, замечая файл.
+
+`database/` в первый список не входит: миграции и upgrade-команды работают
+офлайн, под оператором, и у них своя дисциплина (`docs/UPGRADE_COMMANDS.md`).
 
 ## Формат правил
 
