@@ -39,12 +39,30 @@ export const resolveOnemaAccessSubject = ({
     ? getRoleIdsFromRolePermissionConfig(rolePermissionConfig)
     : [];
 
-  return {
+  return buildOnemaAccessSubject({
+    roleIds,
     workspaceMemberId: isUserAuthContext(authContext)
       ? authContext.workspaceMemberId
       : undefined,
-    roleUniversalIdentifiers: roleIds
-      .map((roleId) => flatRoleMaps.universalIdentifierById[roleId])
-      .filter(isDefined),
-  };
+    flatRoleMaps,
+  });
 };
+
+// The realtime publisher (rls-design §4, point №3) already holds the roles of
+// the stream's subscriber and cannot reach them through an auth context: the
+// stream stores ids, and the actor of the surrounding request is whoever wrote
+// the record, not whoever is subscribed to it
+export const buildOnemaAccessSubject = ({
+  roleIds,
+  workspaceMemberId,
+  flatRoleMaps,
+}: {
+  roleIds: string[];
+  workspaceMemberId: string | undefined;
+  flatRoleMaps: FlatRoleMaps;
+}): OnemaAccessSubject => ({
+  workspaceMemberId,
+  roleUniversalIdentifiers: roleIds
+    .map((roleId) => flatRoleMaps.universalIdentifierById[roleId])
+    .filter(isDefined),
+});

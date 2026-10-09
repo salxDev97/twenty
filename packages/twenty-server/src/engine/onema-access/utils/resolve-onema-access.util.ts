@@ -26,6 +26,11 @@ export type OnemaAccessScope = {
     objectMetadataId: string,
   ) => WorkspaceTableShape;
   shouldBypassPermissionChecks: boolean;
+  // Set by the realtime publisher alone (rls-design §4, point №3): it asks on
+  // behalf of the subscriber of a stream, and the auth context around it belongs
+  // to whoever wrote the record. Everywhere else the subject is the caller, and
+  // reading it from the auth context is the only way it stays that
+  subject?: OnemaAccessSubject;
 };
 
 // The raw executor of the transaction scope belongs to no object, and nothing
@@ -124,12 +129,14 @@ export const resolveOnemaAccess = ({
     };
   }
 
-  const subject = resolveOnemaAccessSubject({
-    authContext: scope.authContext,
-    userWorkspaceRoleMap: scope.internalContext.userWorkspaceRoleMap,
-    apiKeyRoleMap: scope.internalContext.apiKeyRoleMap,
-    flatRoleMaps: scope.internalContext.flatRoleMaps,
-  });
+  const subject =
+    scope.subject ??
+    resolveOnemaAccessSubject({
+      authContext: scope.authContext,
+      userWorkspaceRoleMap: scope.internalContext.userWorkspaceRoleMap,
+      apiKeyRoleMap: scope.internalContext.apiKeyRoleMap,
+      flatRoleMaps: scope.internalContext.flatRoleMaps,
+    });
 
   return {
     kind: 'active',

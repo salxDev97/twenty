@@ -33,6 +33,7 @@ import { SubscriptionService } from 'src/engine/subscriptions/subscription.servi
 import { type EventStreamData } from 'src/engine/subscriptions/types/event-stream-data.type';
 import { WorkspaceCacheService } from 'src/engine/workspace-cache/services/workspace-cache.service';
 import { type WorkspaceEventBatch } from 'src/engine/workspace-event-emitter/types/workspace-event-batch.type';
+import { OnemaRealtimeRecordFilterService } from 'src/engine/onema-access/services/onema-realtime-record-filter.service';
 import { ObjectRecordEventPublisher } from 'src/engine/subscriptions/object-record-event/object-record-event-publisher';
 
 jest.mock(
@@ -116,6 +117,10 @@ describe('ObjectRecordEventPublisher', () => {
   let mockWorkspaceOrmManager: {
     executeInWorkspaceContext: jest.Mock;
     getRepository: jest.Mock;
+  };
+
+  let mockOnemaRealtimeRecordFilterService: {
+    resolveVisibleRecordIds: jest.Mock;
   };
 
   const companyNameField = getFlatFieldMetadataMock({
@@ -306,6 +311,12 @@ describe('ObjectRecordEventPublisher', () => {
       getRepository: jest.fn(),
     };
 
+    // Onema fork (ADR-003): no rules file configured is the default, and then
+    // the publisher behaves exactly as upstream wrote it
+    mockOnemaRealtimeRecordFilterService = {
+      resolveVisibleRecordIds: jest.fn().mockResolvedValue(undefined),
+    };
+
     mockWorkspaceManyOrAllFlatEntityMapsCacheService = {
       getOrRecomputeManyOrAllFlatEntityMaps: jest.fn().mockResolvedValue({
         flatFieldMetadataMaps: mockFlatFieldMetadataMaps,
@@ -360,6 +371,10 @@ describe('ObjectRecordEventPublisher', () => {
         {
           provide: WorkspaceOrmManager,
           useValue: mockWorkspaceOrmManager,
+        },
+        {
+          provide: OnemaRealtimeRecordFilterService,
+          useValue: mockOnemaRealtimeRecordFilterService,
         },
       ],
     }).compile();
@@ -418,6 +433,79 @@ describe('ObjectRecordEventPublisher', () => {
       expect(
         publishCall.payload.objectRecordEventsWithQueryIds[0].queryIds,
       ).toContain('query-1');
+    });
+
+    // Onema fork (ADR-003), rls-design §4 point №3 and the §11 row "Realtime:
+    // изменение L2". The event carries the record itself, so a subscriber whose
+    // rules hide it must not be told that it changed either.
+    describe('Onema record-level rules', () => {
+      const publishTwoCompaniesUpdated = () =>
+        service.publish({
+          name: 'company.updated',
+          workspaceId,
+          objectMetadata: companyObjectMetadata,
+          events: [
+            createMockEvent(),
+            createMockEvent({
+              recordId: 'record-2',
+              properties: { after: { id: 'record-2', name: 'Somebody Else' } },
+            }),
+          ],
+        } as WorkspaceEventBatch<never>);
+
+      const publishedRecordIds = () => {
+        const publishCall = (
+          mockSubscriptionService.publishToEventStream as jest.Mock
+        ).mock.calls[0][0];
+
+        return publishCall.payload.objectRecordEventsWithQueryIds.map(
+          (matchedEvent: { objectRecordEvent: { recordId: string } }) =>
+            matchedEvent.objectRecordEvent.recordId,
+        );
+      };
+
+      it('does not deliver an event about a record the rules hide from the subscriber', async () => {
+        mockOnemaRealtimeRecordFilterService.resolveVisibleRecordIds.mockResolvedValue(
+          new Set(['record-1']),
+        );
+
+        await publishTwoCompaniesUpdated();
+
+        expect(publishedRecordIds()).toEqual(['record-1']);
+      });
+
+      it('publishes nothing at all when the rules hide every record of the batch', async () => {
+        mockOnemaRealtimeRecordFilterService.resolveVisibleRecordIds.mockResolvedValue(
+          new Set(),
+        );
+
+        await publishTwoCompaniesUpdated();
+
+        expect(
+          mockSubscriptionService.publishToEventStream,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('leaves the batch untouched when no rules file is configured', async () => {
+        await publishTwoCompaniesUpdated();
+
+        expect(publishedRecordIds()).toEqual(['record-1', 'record-2']);
+      });
+
+      // The roles of the subscriber, not of whoever wrote the record: the
+      // publisher runs inside the writer's request (rls-design §4)
+      it('asks about the records of the batch under the roles of the subscriber', async () => {
+        await publishTwoCompaniesUpdated();
+
+        expect(
+          mockOnemaRealtimeRecordFilterService.resolveVisibleRecordIds,
+        ).toHaveBeenCalledWith({
+          objectNameSingular: 'company',
+          recordIds: ['record-1', 'record-2'],
+          roleIds: [roleId],
+          workspaceMemberId: 'test-workspace-member-id',
+        });
+      });
     });
 
     it('should not publish events when object-level read permission is denied', async () => {
