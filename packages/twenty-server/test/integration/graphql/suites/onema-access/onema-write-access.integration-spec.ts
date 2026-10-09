@@ -829,20 +829,29 @@ describe('onemaWriteAccess', () => {
     // `company: { connect: { where: { id } } }` sets the same foreign key by a
     // different road through the API, and a check that only knew about the flat
     // `companyId` would have been walked straight past.
+    //
+    // It turns out to be closed one gate earlier than the flat form, and the
+    // error says so: the connect resolves its target by reading it, that read
+    // carries the predicate of point №1, and a company the author may not see
+    // is simply not there to connect to. Hence BAD_USER_INPUT rather than the
+    // FORBIDDEN of the check after the write — the write never happens at all.
     it('refuses a nested connect to a parent its author may not see', async () => {
       setOnemaAccessRulesForTesting(personGrantsAccessToItsCompanyRules());
 
-      expectForbidden(
-        await makeRequestAsJony(
-          createOneOperationFactory({
-            objectMetadataSingularName: 'person',
-            gqlFields: 'id jobTitle',
-            data: {
-              jobTitle: LINKED_PERSON_JOB_TITLE,
-              company: { connect: { where: { id: foreignCompanyId } } },
-            },
-          }),
-        ),
+      const creation = await makeRequestAsJony(
+        createOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle',
+          data: {
+            jobTitle: LINKED_PERSON_JOB_TITLE,
+            company: { connect: { where: { id: foreignCompanyId } } },
+          },
+        }),
+      );
+
+      expect(creation.body.errors).toBeDefined();
+      expect(creation.body.errors[0].message).toMatch(
+        /found 0 .*to connect to company|Expected 1 record to connect to company/,
       );
 
       expect(
@@ -874,28 +883,50 @@ describe('onemaWriteAccess', () => {
     });
 
     // The patch form: the same nested shape on an update moves an existing
-    // record onto a foreign parent, which is the grant written sideways
+    // record onto a foreign parent, which is the grant written sideways — and
+    // is closed by the same unreachable connect target as the creation above
     it('refuses a nested connect that moves a record onto a foreign parent', async () => {
       setOnemaAccessRulesForTesting(personGrantsAccessToItsCompanyRules());
 
-      expectForbidden(
-        await makeRequestAsJony(
-          updateOneOperationFactory({
-            objectMetadataSingularName: 'person',
-            gqlFields: 'id company { id }',
-            recordId: ownedPersonId,
-            data: { company: { connect: { where: { id: foreignCompanyId } } } },
-          }),
-        ),
+      const move = await makeRequestAsJony(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: ownedPersonId,
+          data: { company: { connect: { where: { id: foreignCompanyId } } } },
+        }),
       );
 
+      expect(move.body.errors).toBeDefined();
       expect(await readPersonCompanyId(ownedPersonId)).toBe(ownedCompanyId);
     });
 
-    // `create` makes the parent in the same mutation, so the author owns it by
-    // construction — the owner default fills accountOwner and the link is
-    // legitimate. What matters is that the nested creation goes through the
-    // check rather than around it: the child is admitted because its parent is.
+    // The same patch onto a parent the author does own goes through, so the
+    // refusal above is a refusal and not a shape the API rejects outright
+    it('accepts a nested connect that moves a record onto an owned parent', async () => {
+      setOnemaAccessRulesForTesting(personGrantsAccessToItsCompanyRules());
+
+      const move = await makeRequestAsJony(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: ownedPersonId,
+          data: {
+            company: { connect: { where: { id: secondOwnedCompanyId } } },
+          },
+        }),
+      );
+
+      expect(move.body.errors).toBeUndefined();
+      expect(await readPersonCompanyId(ownedPersonId)).toBe(
+        secondOwnedCompanyId,
+      );
+    });
+
+    // `create` makes the parent inside the same mutation, so there is no
+    // earlier read to close it — the only thing standing between the author and
+    // a child hung on a parent is the check after the write. Here the parent is
+    // made visible to its author, so both the parent and the child are admitted.
     it('accepts a nested create of the parent it then hangs on', async () => {
       setOnemaAccessRulesForTesting(personGrantsAccessToItsCompanyRules());
 
@@ -905,15 +936,35 @@ describe('onemaWriteAccess', () => {
           gqlFields: 'id jobTitle company { id name accountOwner { id } }',
           data: {
             jobTitle: LINKED_PERSON_JOB_TITLE,
-            company: { create: { name: NESTED_COMPANY_NAME } },
+            company: {
+              create: {
+                name: NESTED_COMPANY_NAME,
+                accountOwnerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+              },
+            },
           },
         }),
       );
 
       expect(creation.body.errors).toBeUndefined();
-      expect(creation.body.data.createPerson.company.accountOwner.id).toBe(
+
+      // Asked of the row rather than of the response: what the mutation
+      // selects back is a read of its own, and the question here is what was
+      // written
+      const nestedCompanies = await readBehindTheRules<SeedCompany>({
+        objectMetadataSingularName: 'company',
+        objectMetadataPluralName: 'companies',
+        gqlFields: 'id name accountOwner { id }',
+        filter: { name: { eq: NESTED_COMPANY_NAME } },
+      });
+
+      expect(nestedCompanies).toHaveLength(1);
+      expect(nestedCompanies[0].accountOwner?.id).toBe(
         WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
       );
+      expect(
+        await readPersonCompanyId(creation.body.data.createPerson.id),
+      ).toBe(nestedCompanies[0].id);
     });
 
     // And the same nested create under rules that close `company` to this role
