@@ -8,6 +8,7 @@ import {
   OnemaAccessException,
   OnemaAccessExceptionCode,
 } from 'src/engine/onema-access/exceptions/onema-access.exception';
+import { closesOnemaRuleCycle } from 'src/engine/onema-access/utils/closes-onema-rule-cycle.util';
 import {
   type OnemaAccessRules,
   type OnemaAccessSubject,
@@ -594,8 +595,6 @@ const resolveColumnName = ({
   );
 };
 
-// The exempt object is the one the chain was seeded with, and only a chain
-// seeded by a written row has one; every other revisit is still a cycle
 const closesACycle = ({
   objectPath,
   objectName,
@@ -605,7 +604,11 @@ const closesACycle = ({
   objectName: string;
   state: CompilationState;
 }): boolean =>
-  objectPath.includes(objectName) && objectName !== state.cycleExemptObjectName;
+  closesOnemaRuleCycle({
+    objectPath,
+    objectName,
+    cycleExemptObjectName: state.cycleExemptObjectName,
+  });
 
 const quoteColumn = (alias: string, columnName: string): string =>
   `${escapeIdentifier(alias)}.${escapeIdentifier(columnName)}`;

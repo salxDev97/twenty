@@ -652,6 +652,72 @@ describe('compileOnemaWriteParentAccess', () => {
     });
   });
 
+  // The exemption buys the one return the seed causes, and the compiled
+  // condition says so: one subquery over the written object's table, not one per
+  // level of a walk that keeps coming back. What decides where the walk stops is
+  // unit-tested on its own (closes-onema-rule-cycle.util.spec.ts); here it is
+  // the shape of the SQL that is pinned.
+  it('reaches the written object once in the compiled condition', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          project: {
+            contractor: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: { eq: ['member', '$me'] },
+              },
+            },
+          },
+          projectMember: {
+            contractor: {
+              or: [
+                { eq: ['member', '$me'] },
+                { exists: { object: 'task', backForeignKey: 'project' } },
+              ],
+            },
+          },
+          task: {
+            contractor: {
+              or: [
+                { eq: ['isUrgent', true] },
+                {
+                  exists: {
+                    object: 'projectMember',
+                    backForeignKey: 'project',
+                  },
+                },
+              ],
+            },
+          },
+        },
+        writeRequiresParentAccess: {
+          projectMember: [{ foreignKey: 'project', object: 'project' }],
+        },
+      },
+      subject: contractorSubject,
+    });
+
+    const rowAccess = compileOnemaWriteParentAccess({
+      tableShape: projectMemberTableShape,
+      tableAlias: 'projectMember',
+      parents: [{ foreignKey: 'project', object: 'project' }],
+      context,
+    });
+
+    expect(rowAccess.kind).toBe('gated');
+
+    if (rowAccess.kind !== 'gated') {
+      return;
+    }
+
+    expect(
+      rowAccess.condition.sql.match(/"_projectMember"/g) ?? [],
+    ).toHaveLength(1);
+  });
+
   // A plain read keeps the old answer: nothing seeds an exemption there, so a
   // rule that walks back to its own object is still the cycle it always was
   it('keeps denying a cycle when the same rules are compiled for a read', () => {
