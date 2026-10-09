@@ -69,7 +69,12 @@ export const assertOnemaProtectedFieldsAreWritable = ({
       continue;
     }
 
+    // Only a person holds a role for this purpose. An API key carries the role
+    // of whoever created it, so a key made under a CEO or admin role would
+    // otherwise be a standing way to PATCH the field the product rule rests on
+    // with nobody accountable for it — and a key outlives the person.
     if (
+      scope.authContext.type === 'user' &&
       roleKeys.some((roleKey) =>
         resolution.compilationContext.roleKeys.includes(roleKey),
       )

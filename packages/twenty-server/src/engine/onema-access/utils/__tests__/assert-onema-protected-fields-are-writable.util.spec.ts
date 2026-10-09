@@ -4,6 +4,7 @@ import {
   applicationAuthContext,
   buildTestAccessScope,
   CEO_ROLE_UNIVERSAL_IDENTIFIER,
+  ceoApiKeyAuthContext,
   ceoAuthContext,
   otherApplicationAuthContext,
   SALES_ROLE_UNIVERSAL_IDENTIFIER,
@@ -129,6 +130,20 @@ describe('assertOnemaProtectedFieldsAreWritable', () => {
     expect(() => assertWritable({ updatedColumns: ['orgRole'] })).toThrow(
       /opportunity\.orgRole/,
     );
+  });
+
+  // An API key is created under somebody's role and then outlives them, so the
+  // role exception is a human one: a CEO key would otherwise be a standing PATCH
+  // channel into the field the product rule rests on
+  it('refuses the role exception to an API key holding that very role', () => {
+    setOnemaAccessRulesForTesting(protectedRules);
+
+    expect(() =>
+      assertWritable({
+        updatedColumns: ['orgRole'],
+        authContext: ceoApiKeyAuthContext,
+      }),
+    ).toThrow(/opportunity\.orgRole/);
   });
 
   // The rules name the relation, the write names the join column

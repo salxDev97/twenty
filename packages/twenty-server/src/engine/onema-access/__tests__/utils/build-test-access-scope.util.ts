@@ -13,6 +13,7 @@ export const WORKSPACE_MEMBER_ID = '11111111-1111-4111-8111-111111111111';
 export const USER_WORKSPACE_ID = '22222222-2222-4222-8222-222222222222';
 export const CEO_USER_WORKSPACE_ID = '33333333-3333-4333-8333-333333333333';
 export const API_KEY_ID = '44444444-4444-4444-8444-444444444444';
+export const CEO_API_KEY_ID = '55555555-5555-4555-8555-555555555555';
 
 export const salesAuthContext = {
   type: 'user',
@@ -29,6 +30,17 @@ export const ceoAuthContext = {
 export const apiKeyAuthContext = {
   type: 'apiKey',
   apiKey: { id: API_KEY_ID },
+} as unknown as WorkspaceAuthContext;
+
+export const ceoApiKeyAuthContext = {
+  type: 'apiKey',
+  apiKey: { id: CEO_API_KEY_ID },
+} as unknown as WorkspaceAuthContext;
+
+// What a worker or a scheduled job carries: no user, no role, and nothing the
+// rules can read as "$me"
+export const systemAuthContext = {
+  type: 'system',
 } as unknown as WorkspaceAuthContext;
 
 export const applicationAuthContext = {
@@ -67,7 +79,10 @@ export const buildTestAccessScope = ({
         [USER_WORKSPACE_ID]: SALES_ROLE_ID,
         [CEO_USER_WORKSPACE_ID]: CEO_ROLE_ID,
       },
-      apiKeyRoleMap: { [API_KEY_ID]: SALES_ROLE_ID },
+      apiKeyRoleMap: {
+        [API_KEY_ID]: SALES_ROLE_ID,
+        [CEO_API_KEY_ID]: CEO_ROLE_ID,
+      },
       flatRoleMaps: {
         byUniversalIdentifier: {
           [SALES_ROLE_UNIVERSAL_IDENTIFIER]: { id: SALES_ROLE_ID },
