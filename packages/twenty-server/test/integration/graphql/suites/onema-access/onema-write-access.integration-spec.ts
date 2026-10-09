@@ -11,6 +11,7 @@ import { destroyOneOperationFactory } from 'test/integration/graphql/utils/destr
 import { findManyOperationFactory } from 'test/integration/graphql/utils/find-many-operation-factory.util';
 import { makeGraphqlApiRequest as makeRequestAsAdmin } from 'test/integration/graphql/utils/make-graphql-api-request.util';
 import { makeGraphqlApiRequestWithMemberRole as makeRequestAsJony } from 'test/integration/graphql/utils/make-graphql-api-request-with-member-role.util';
+import { mergeManyOperationFactory } from 'test/integration/graphql/utils/merge-many-operation-factory.util';
 import { restoreManyOperationFactory } from 'test/integration/graphql/utils/restore-many-operation-factory.util';
 import { updateManyOperationFactory } from 'test/integration/graphql/utils/update-many-operation-factory.util';
 import { updateOneOperationFactory } from 'test/integration/graphql/utils/update-one-operation-factory.util';
@@ -687,6 +688,283 @@ describe('onemaWriteAccess', () => {
     }
 
     expect(await readPersonCompanyId(ownedPersonId)).toBe(ownedCompanyId);
+  });
+
+  // The race itself, with no freeze in place when it starts: "the lead becomes a
+  // DEAL" against "the lead changes company", issued together.
+  //
+  // Both racers write `jobTitle`, which is what makes the race observable at all.
+  // The latch says the stage is reached and never left, so in every legitimate
+  // serial order the row ends on DEAL. Without the lock a company racer that
+  // read "PROPOSAL" before the DEAL committed still writes afterwards, puts
+  // `jobTitle` back to PROPOSAL and leaves the row in a state no serial order
+  // could reach — which is exactly what this asserts against.
+  //
+  // Which side loses is up to the scheduler and is not asserted: a company
+  // change that commits before the DEAL is a legitimate order. What is asserted
+  // is that the outcome agrees with the answers the racers were given.
+  //
+  // Verified by taking the lock out: the row came back on PROPOSAL, which no
+  // serial order reaches. Being a real race it caught that in two runs out of
+  // three, which is why there are eight racers rather than one.
+  it('settles a freeze racing the write that creates it', async () => {
+    const latchedRules: OnemaAccessRules = {
+      roles: { member: memberRoleUniversalIdentifier },
+      objects: { person: { member: { all: true } } },
+      freezeWhen: {
+        person: [
+          {
+            field: 'jobTitle',
+            equals: 'DEAL',
+            fields: ['company'],
+            isIrreversible: true,
+          },
+        ],
+      },
+    };
+
+    setOnemaAccessRulesForTesting(undefined);
+    await makeRequestAsAdmin(
+      updateOneOperationFactory({
+        objectMetadataSingularName: 'person',
+        gqlFields: 'id jobTitle company { id }',
+        recordId: ownedPersonId,
+        data: { jobTitle: 'PROPOSAL', companyId: ownedCompanyId },
+      }),
+    );
+
+    setOnemaAccessRulesForTesting(latchedRules);
+
+    const [dealRacer, ...companyRacers] = await Promise.all([
+      makeRequestAsJony(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle',
+          recordId: ownedPersonId,
+          data: { jobTitle: 'DEAL' },
+        }),
+      ),
+      // The shape a form submits: the company the user picked, and the stage
+      // the record showed when the form was opened
+      ...[0, 1, 2, 3, 4, 5, 6, 7].map(() =>
+        makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle company { id }',
+            recordId: ownedPersonId,
+            data: { jobTitle: 'PROPOSAL', companyId: secondOwnedCompanyId },
+          }),
+        ),
+      ),
+    ]);
+
+    // Nothing freezes the move *into* the stage, so this one always holds
+    expect(dealRacer.body.errors).toBeUndefined();
+
+    for (const companyRacer of companyRacers) {
+      if (companyRacer.body.errors !== undefined) {
+        expectForbidden(companyRacer);
+      }
+    }
+
+    const settled = (
+      await readBehindTheRules<SeedPerson>({
+        objectMetadataSingularName: 'person',
+        objectMetadataPluralName: 'people',
+        gqlFields: 'id jobTitle company { id }',
+        filter: { id: { eq: ownedPersonId } },
+      })
+    )[0];
+
+    expect(settled.jobTitle).toBe('DEAL');
+
+    // A racer that was told its write went through has to be the state the row
+    // is in; one that was refused must have changed nothing
+    const hasCommittedCompanyChange = companyRacers.some(
+      (companyRacer) => companyRacer.body.errors === undefined,
+    );
+
+    expect(settled.company?.id).toBe(
+      hasCommittedCompanyChange ? secondOwnedCompanyId : ownedCompanyId,
+    );
+  });
+
+  // The review's open question on Т-2: a soft delete and a restore write
+  // `deletedAt` and nothing else, so a rule naming that field frozen used to see
+  // neither. Putting a settled record away is a change to it like any other.
+  describe('a frozen record being put away and brought back', () => {
+    const deletedAtFrozenRules = (): OnemaAccessRules => ({
+      roles: { member: memberRoleUniversalIdentifier },
+      objects: { person: { member: { all: true } } },
+      freezeWhen: {
+        person: [{ field: 'jobTitle', equals: 'DEAL', fields: ['deletedAt'] }],
+      },
+    });
+
+    const setJobTitleAsAdmin = async (jobTitle: string): Promise<void> => {
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle',
+          recordId: ownedPersonId,
+          data: { jobTitle },
+        }),
+      );
+    };
+
+    afterEach(async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        restoreManyOperationFactory({
+          objectMetadataSingularName: 'person',
+          objectMetadataPluralName: 'people',
+          gqlFields: 'id',
+          filter: { id: { eq: ownedPersonId } },
+        }),
+      );
+    });
+
+    it('refuses soft-deleting a record whose deletedAt is frozen', async () => {
+      await setJobTitleAsAdmin('DEAL');
+      setOnemaAccessRulesForTesting(deletedAtFrozenRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          deleteManyOperationFactory({
+            objectMetadataSingularName: 'person',
+            objectMetadataPluralName: 'people',
+            gqlFields: 'id',
+            filter: { id: { eq: ownedPersonId } },
+          }),
+        ),
+      );
+
+      expect(await readSoftDeletedPersonIds([ownedPersonId])).toEqual([]);
+    });
+
+    it('refuses restoring a record whose deletedAt is frozen', async () => {
+      await setJobTitleAsAdmin('NOT A DEAL');
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        deleteManyOperationFactory({
+          objectMetadataSingularName: 'person',
+          objectMetadataPluralName: 'people',
+          gqlFields: 'id',
+          filter: { id: { eq: ownedPersonId } },
+        }),
+      );
+      await setJobTitleAsAdmin('DEAL');
+
+      setOnemaAccessRulesForTesting(deletedAtFrozenRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          restoreManyOperationFactory({
+            objectMetadataSingularName: 'person',
+            objectMetadataPluralName: 'people',
+            gqlFields: 'id',
+            filter: { id: { eq: ownedPersonId } },
+          }),
+        ),
+      );
+
+      expect(await readSoftDeletedPersonIds([ownedPersonId])).toEqual([
+        ownedPersonId,
+      ]);
+    });
+
+    // The refusals above mean nothing unless the same two writes go through on a
+    // record the condition does not hold for
+    it('lets a record the freeze does not cover be put away and brought back', async () => {
+      await setJobTitleAsAdmin('NOT A DEAL');
+      setOnemaAccessRulesForTesting(deletedAtFrozenRules());
+
+      const softDeletion = await makeRequestAsJony(
+        deleteManyOperationFactory({
+          objectMetadataSingularName: 'person',
+          objectMetadataPluralName: 'people',
+          gqlFields: 'id',
+          filter: { id: { eq: ownedPersonId } },
+        }),
+      );
+
+      expect(softDeletion.body.errors).toBeUndefined();
+      expect(await readSoftDeletedPersonIds([ownedPersonId])).toEqual([
+        ownedPersonId,
+      ]);
+
+      setOnemaAccessRulesForTesting(deletedAtFrozenRules());
+
+      const restoration = await makeRequestAsJony(
+        restoreManyOperationFactory({
+          objectMetadataSingularName: 'person',
+          objectMetadataPluralName: 'people',
+          gqlFields: 'id',
+          filter: { id: { eq: ownedPersonId } },
+        }),
+      );
+
+      expect(restoration.body.errors).toBeUndefined();
+      expect(await readSoftDeletedPersonIds([ownedPersonId])).toEqual([]);
+    });
+  });
+
+  // Б4, the other half, and what checking it turned up. The review read the
+  // merge runner building its returning list out of the GraphQL selection and
+  // called a false refusal possible; it is not, because `buildColumnsToSelect`
+  // adds `id` to every selection it builds. So this passed before the id was
+  // made part of the write path too — it is here as the regression test for the
+  // path, not as proof of a bug. What does not rest on that upstream detail any
+  // more is the invariant: `withOnemaReturnedIdColumn` puts the column in
+  // whatever the caller asked for (with-onema-returned-id-column.util.spec.ts).
+  it('checks a merge that asks the mutation for no id of its own', async () => {
+    const MERGED_PERSON_JOB_TITLE = 'Onema write access (merged person)';
+
+    setOnemaAccessRulesForTesting(undefined);
+
+    const mergedPersonIds = [
+      (
+        await createFixturePerson({
+          jobTitle: MERGED_PERSON_JOB_TITLE,
+          companyId: ownedCompanyId,
+        })
+      ).id,
+      (
+        await createFixturePerson({
+          jobTitle: MERGED_PERSON_JOB_TITLE,
+          companyId: ownedCompanyId,
+        })
+      ).id,
+    ];
+
+    setOnemaAccessRulesForTesting(personFollowsItsCompanyRules());
+
+    const merge = await makeRequestAsJony(
+      mergeManyOperationFactory({
+        objectMetadataPluralName: 'people',
+        gqlFields: 'jobTitle',
+        ids: mergedPersonIds,
+        conflictPriorityIndex: 0,
+      }),
+    );
+
+    expect(merge.body.errors).toBeUndefined();
+    expect(merge.body.data.mergePeople.jobTitle).toBe(MERGED_PERSON_JOB_TITLE);
+
+    const survivors = await readBehindTheRules<SeedPerson>({
+      objectMetadataSingularName: 'person',
+      objectMetadataPluralName: 'people',
+      gqlFields: 'id jobTitle',
+      filter: { jobTitle: { eq: MERGED_PERSON_JOB_TITLE } },
+    });
+
+    await destroyFixtureRecords({
+      objectMetadataSingularName: 'person',
+      recordIds: [
+        ...new Set([...mergedPersonIds, ...survivors.map(({ id }) => id)]),
+      ],
+    });
   });
 
   // Б5, rls-design §5. The record is visible to whoever just wrote it — that is
