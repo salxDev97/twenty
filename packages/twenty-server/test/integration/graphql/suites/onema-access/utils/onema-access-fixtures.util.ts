@@ -1,11 +1,13 @@
 import { createOneOperationFactory } from 'test/integration/graphql/utils/create-one-operation-factory.util';
 import { destroyOneOperationFactory } from 'test/integration/graphql/utils/destroy-one-operation-factory.util';
 import { makeGraphqlApiRequest as makeRequestAsAdmin } from 'test/integration/graphql/utils/make-graphql-api-request.util';
+import { isDefined } from 'twenty-shared/utils';
 
 export type OnemaFixtureCompany = {
   id: string;
   name: string;
   accountOwnerId: string;
+  employees?: number;
 };
 
 export type OnemaFixturePerson = {
@@ -21,15 +23,21 @@ export type OnemaFixturePerson = {
 export const createFixtureCompany = async ({
   name,
   accountOwnerId,
+  employees,
 }: {
   name: string;
   accountOwnerId: string;
+  employees?: number;
 }): Promise<OnemaFixtureCompany> => {
   const response = await makeRequestAsAdmin(
     createOneOperationFactory({
       objectMetadataSingularName: 'company',
       gqlFields: 'id name accountOwner { id }',
-      data: { name, accountOwnerId },
+      data: {
+        name,
+        accountOwnerId,
+        ...(isDefined(employees) && { employees }),
+      },
     }),
   );
 
@@ -39,6 +47,7 @@ export const createFixtureCompany = async ({
     id: response.body.data.createCompany.id,
     name,
     accountOwnerId,
+    employees,
   };
 };
 

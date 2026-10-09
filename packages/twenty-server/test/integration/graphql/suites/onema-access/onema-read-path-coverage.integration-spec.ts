@@ -3,8 +3,9 @@ import {
   createFixtureCompany,
   destroyFixtureRecords,
 } from 'test/integration/graphql/suites/onema-access/utils/onema-access-fixtures.util';
-import { makeGraphqlApiRequest as makeRequestAsAdmin } from 'test/integration/graphql/utils/make-graphql-api-request.util';
+import { makeGraphqlApiRequest } from 'test/integration/graphql/utils/make-graphql-api-request.util';
 import { findManyOperationFactory } from 'test/integration/graphql/utils/find-many-operation-factory.util';
+import { groupByOperationFactory } from 'test/integration/graphql/utils/group-by-operation-factory.util';
 import { search } from 'test/integration/graphql/utils/search.util';
 import { makeRestApiRequest } from 'test/integration/rest/utils/make-rest-api-request.util';
 import { waitForAllJobsToFinish } from 'test/integration/utils/wait-for-all-jobs-to-finish.util';
@@ -19,18 +20,23 @@ const client = request(`http://localhost:${APP_PORT}`);
 // anything the suite did not create
 const SEARCH_TOKEN = 'onemareadpath';
 
+// Distinct headcounts, so a sum that quietly covered the wrong rows cannot
+// land on the expected number by accident
 const COMPANY_FIXTURES = [
   {
     name: `${SEARCH_TOKEN} owned by the member`,
     ownerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+    employees: 11,
   },
   {
     name: `${SEARCH_TOKEN} owned by somebody else`,
     ownerId: WORKSPACE_MEMBER_DATA_SEED_IDS.PHIL,
+    employees: 101,
   },
   {
     name: `${SEARCH_TOKEN} owned by the admin`,
     ownerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JANE,
+    employees: 1001,
   },
 ];
 
@@ -75,7 +81,10 @@ describe('onemaReadPathCoverage', () => {
   };
 
   const roleUniversalIdentifierOfWorkspaceMember = (
-    roles: { universalIdentifier: string; workspaceMembers?: { id: string }[] }[],
+    roles: {
+      universalIdentifier: string;
+      workspaceMembers?: { id: string }[];
+    }[],
     workspaceMemberId: string,
   ): string =>
     roles.find((role) =>
@@ -105,9 +114,13 @@ describe('onemaReadPathCoverage', () => {
 
     const createdCompanies = [];
 
-    for (const { name, ownerId } of COMPANY_FIXTURES) {
+    for (const { name, ownerId, employees } of COMPANY_FIXTURES) {
       createdCompanies.push(
-        await createFixtureCompany({ name, accountOwnerId: ownerId }),
+        await createFixtureCompany({
+          name,
+          accountOwnerId: ownerId,
+          employees,
+        }),
       );
     }
 
@@ -149,7 +162,10 @@ describe('onemaReadPathCoverage', () => {
     return response;
   };
 
-  const installOwnerRuleFor = (roleKey: string, universalIdentifier: string) => {
+  const installOwnerRuleFor = (
+    roleKey: string,
+    universalIdentifier: string,
+  ) => {
     const rules: OnemaAccessRules = {
       roles: { [roleKey]: universalIdentifier },
       objects: {
@@ -214,13 +230,57 @@ describe('onemaReadPathCoverage', () => {
     });
   });
 
+  // §11, "groupBy lead + sum(amount)" and "salesSummary → итог отдела". The
+  // count of a group is narrowed already (onema-row-access); an aggregate is a
+  // second expression on the same query, and a total that still carries the
+  // rows of somebody else tells the member the figure they are not allowed to
+  // read, one subtraction away
+  describe('an aggregate over the groups', () => {
+    const sumEmployeesOverVisibleCompanies = async (accessToken: string) => {
+      const response = await makeGraphqlApiRequest(
+        groupByOperationFactory({
+          objectMetadataSingularName: 'company',
+          objectMetadataPluralName: 'companies',
+          groupBy: [{ name: true }],
+          filter: { id: { in: companyIdsUnderTest } },
+          gqlFields: 'sumEmployees',
+          limit: 100,
+        }),
+        accessToken,
+      );
+
+      expect(response.body.errors).toBeUndefined();
+
+      return (
+        response.body.data.companiesGroupBy as { sumEmployees: number }[]
+      ).reduce((total, group) => total + group.sumEmployees, 0);
+    };
+
+    const totalHeadcountOf = (fixtures: { employees: number }[]) =>
+      fixtures.reduce((total, fixture) => total + fixture.employees, 0);
+
+    it('sums every company of the suite while no rules file is configured', async () => {
+      expect(
+        await sumEmployeesOverVisibleCompanies(APPLE_JONY_MEMBER_ACCESS_TOKEN),
+      ).toBe(totalHeadcountOf(COMPANY_FIXTURES));
+    });
+
+    it('sums only the company of the member once the rule names the owner', async () => {
+      installOwnerRuleFor('member', memberRoleUniversalIdentifier);
+
+      expect(
+        await sumEmployeesOverVisibleCompanies(APPLE_JONY_MEMBER_ACCESS_TOKEN),
+      ).toBe(COMPANY_FIXTURES[0].employees);
+    });
+  });
+
   // §11, "API-ключ с ролью «Сейлз», lead → 0 (`$me` нет)". The seeded key holds
   // the admin role, so the same rule is asked of a person and of a key: the
   // person sees their own row, the key sees nothing, and the only difference
   // between the two is that one of them is somebody.
   describe('an API key holding a role whose rule asks for "$me"', () => {
     const findCompaniesAsAdmin = async () => {
-      const response = await makeRequestAsAdmin(
+      const response = await makeGraphqlApiRequest(
         findManyOperationFactory({
           objectMetadataSingularName: 'company',
           objectMetadataPluralName: 'companies',
@@ -239,9 +299,8 @@ describe('onemaReadPathCoverage', () => {
     };
 
     const findCompaniesWithTheApiKey = async () => {
-      const response = await findCompaniesOverRestWithBearer(
-        API_KEY_ACCESS_TOKEN,
-      );
+      const response =
+        await findCompaniesOverRestWithBearer(API_KEY_ACCESS_TOKEN);
 
       return companyNamesOf(response.body.data.companies);
     };
