@@ -87,13 +87,26 @@ export const assertOnemaRawSqlIsPermitted = ({
     isGovernedTable({ table, governedTableKeys }),
   );
 
-  if (!isDefined(governedTarget)) {
-    return;
+  if (isDefined(governedTarget)) {
+    throw onemaWriteDenied(
+      `raw "${writeTargets.keyword}" on "${governedTarget.tableName}" would write outside every hook of the access rules`,
+    );
   }
 
-  throw onemaWriteDenied(
-    `raw "${writeTargets.keyword}" on "${governedTarget.tableName}" would write outside every hook of the access rules`,
+  // `U&"…"` is decoded above, so a governed table spelled that way is caught by
+  // its name like any other. What is left is a statement that writes an
+  // ungoverned table through a lexical form no write path of this server
+  // produces — and the escapes are read here by our own decoder rather than by
+  // Postgres, so "this one is harmless" rests on the two agreeing. Refused.
+  const unicodeEscapedTarget = writeTargets.tables.find(
+    (table) => table.spelling === 'unicode-escaped',
   );
+
+  if (isDefined(unicodeEscapedTarget)) {
+    throw onemaWriteDenied(
+      `raw "${writeTargets.keyword}" naming "${unicodeEscapedTarget.tableName}" as a Unicode-escaped identifier cannot be attributed with certainty, so it cannot pass the access rules`,
+    );
+  }
 };
 
 // A statement that names the schema has to match on the schema too; one that

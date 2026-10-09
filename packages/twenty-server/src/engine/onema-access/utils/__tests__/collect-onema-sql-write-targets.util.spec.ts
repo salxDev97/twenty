@@ -224,4 +224,192 @@ describe('collectOnemaSqlWriteTargets', () => {
       tables: [{ schemaName: 'WorkspaceX', tableName: '_task' }],
     });
   });
+
+  // A doubled quote inside a quoted identifier is one quote of the name. The
+  // regex this replaced read `"a""b"` as the name `a` followed by nonsense.
+  it('reads a doubled quote as one quote of the name', () => {
+    expect(
+      collectOnemaSqlWriteTargets('UPDATE "work""space"."_ta""sk" SET "x" = 1'),
+    ).toEqual({
+      kind: 'tables',
+      keyword: 'UPDATE',
+      tables: [{ schemaName: 'work"space', tableName: '_ta"sk' }],
+    });
+  });
+
+  // The hole of review round 4: `U&"…"` is a quoted identifier whose escapes
+  // Postgres reads, and a regex that stops at the `U` reports a write on a
+  // table called "u" — ungoverned, and waved through
+  it.each([
+    [
+      'UPDATE U&"_task" SET "title" = :p0',
+      'UPDATE',
+      [{ tableName: '_task', spelling: 'unicode-escaped' }],
+    ],
+    [
+      'UPDATE "workspace_x".U&"_t\\0061sk" SET "title" = :p0',
+      'UPDATE',
+      [
+        {
+          schemaName: 'workspace_x',
+          tableName: '_task',
+          spelling: 'unicode-escaped',
+        },
+      ],
+    ],
+    [
+      'UPDATE U&"_t\\+000061sk" SET "title" = :p0',
+      'UPDATE',
+      [{ tableName: '_task', spelling: 'unicode-escaped' }],
+    ],
+    // `UESCAPE` puts another character in the backslash's place
+    [
+      `UPDATE U&"_t!0061sk" UESCAPE '!' SET "title" = :p0`,
+      'UPDATE',
+      [{ tableName: '_task', spelling: 'unicode-escaped' }],
+    ],
+    // A doubled escape character is the character itself, not an escape
+    [
+      'UPDATE U&"_t\\\\sk" SET "title" = :p0',
+      'UPDATE',
+      [{ tableName: '_t\\sk', spelling: 'unicode-escaped' }],
+    ],
+    [
+      'DELETE FROM U&"\\0077orkspace_x".U&"_task" WHERE true',
+      'DELETE',
+      [
+        {
+          schemaName: 'workspace_x',
+          tableName: '_task',
+          spelling: 'unicode-escaped',
+        },
+      ],
+    ],
+  ])('decodes the Unicode-escaped target of %s', (sql, keyword, tables) => {
+    expect(collectOnemaSqlWriteTargets(sql)).toEqual({
+      kind: 'tables',
+      keyword,
+      tables,
+    });
+  });
+
+  // Postgres knows which table these name and this does not, which is the one
+  // answer a closed-by-default check may not guess at
+  it.each([
+    ['UPDATE U&"_t\\00zzsk" SET "x" = 1', 'UPDATE'],
+    ['UPDATE U&"_t\\006" SET "x" = 1', 'UPDATE'],
+    [`INSERT INTO U&"_t!00zzsk" UESCAPE '!' ("id") VALUES (:p0)`, 'INSERT'],
+  ])('reads %s as a write it cannot attribute', (sql, keyword) => {
+    expect(collectOnemaSqlWriteTargets(sql)).toEqual({
+      kind: 'unreadable',
+      keyword,
+    });
+  });
+
+  // Fail-closed on the forms nothing here understands: the write is reported,
+  // not the half of it that happened to parse
+  it.each([
+    ['INSERT "workspace_x"."_task" ("id") VALUES (:p0)', 'INSERT'],
+    ['DELETE "workspace_x"."_task" WHERE true', 'DELETE'],
+    ['MERGE "workspace_x"."_task" USING "s" ON true', 'MERGE'],
+    ['UPDATE 42 SET "x" = 1', 'UPDATE'],
+    ['UPDATE SET "x" = 1', 'UPDATE'],
+    ['TRUNCATE TABLE "workspace_x"."_a", (:p0)', 'TRUNCATE'],
+    ['COPY "workspace_x"."_task" ("id")', 'COPY'],
+    [
+      'INSERT INTO "workspace_x"."_task" ("id") VALUES (:p0) ON CONFLICT ("id") DO SOMETHING',
+      'INSERT',
+    ],
+  ])('refuses to read %s as a write on nothing', (sql, keyword) => {
+    const writeTargets = collectOnemaSqlWriteTargets(sql);
+
+    expect(
+      writeTargets.kind === 'unreadable' || writeTargets.kind === 'opaque',
+    ).toBe(true);
+
+    if (writeTargets.kind === 'unreadable') {
+      expect(writeTargets.keyword).toBe(keyword);
+    }
+  });
+
+  // A statement whose target reads cleanly is not excused by a second one that
+  // does not: both are the same raw query
+  it('reports the unreadable target of a statement that also writes a table it can read', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        'UPDATE "workspace_x"."_task" SET "x" = 1; UPDATE (:p0) SET "y" = 2',
+      ),
+    ).toEqual({ kind: 'unreadable', keyword: 'UPDATE' });
+  });
+
+  // An `E'…'` literal beside the target closes where Postgres closes it, so the
+  // target before it and the statement after it are both still read
+  it.each([
+    [
+      `UPDATE "workspace_x"."_task" SET "title" = E'\\\\' WHERE "id" = :p0`,
+      'UPDATE',
+      [{ schemaName: 'workspace_x', tableName: '_task' }],
+    ],
+    [
+      `SELECT E'it''s'; DELETE FROM "workspace_x"."_task" WHERE true`,
+      'DELETE',
+      [{ schemaName: 'workspace_x', tableName: '_task' }],
+    ],
+  ])(
+    'reads the write beside an escape string literal in %s',
+    (sql, keyword, tables) => {
+      expect(collectOnemaSqlWriteTargets(sql)).toEqual({
+        kind: 'tables',
+        keyword,
+        tables,
+      });
+    },
+  );
+
+  // A dollar-quoted string beside the target is a body this cannot read, and a
+  // body may hold anything
+  it('reads a dollar-quoted string beside the target as opaque', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        'UPDATE "workspace_x"."_task" SET "title" = $$ anything $$',
+      ),
+    ).toEqual({ kind: 'opaque', construct: 'a dollar-quoted body' });
+  });
+
+  // `COPY (…) TO` reads, but its query may be a data-modifying statement with
+  // RETURNING, and that write is as real as one at the top level
+  it('reads the write inside the query of a COPY that only copies out', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        'COPY (UPDATE "workspace_x"."_task" SET "title" = :p0 RETURNING "id") TO STDOUT',
+      ),
+    ).toEqual({
+      kind: 'tables',
+      keyword: 'UPDATE',
+      tables: [{ schemaName: 'workspace_x', tableName: '_task' }],
+    });
+  });
+
+  // A MERGE writes the row its own target names, and `THEN UPDATE SET` used to
+  // add a second write on a table called "set"
+  it('reads a MERGE with actions as a write on its target alone', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        'MERGE INTO "workspace_x"."_task" AS t USING "s" ON true WHEN MATCHED THEN UPDATE SET "title" = :p0 WHEN NOT MATCHED THEN INSERT ("id") VALUES (:p1)',
+      ),
+    ).toEqual({
+      kind: 'tables',
+      keyword: 'MERGE',
+      tables: [{ schemaName: 'workspace_x', tableName: '_task' }],
+    });
+  });
+
+  // A qualified name is not a statement, whatever its last part reads like
+  it('does not read the tail of a qualified name as a verb', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        'SELECT onema_utils.truncate(:p0) FROM "workspace_x"."_task"',
+      ),
+    ).toEqual({ kind: 'none' });
+  });
 });

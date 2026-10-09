@@ -263,6 +263,100 @@ describe('assertOnemaRawSqlIsPermitted', () => {
     );
   });
 
+  // The hole of review round 4: `U&"…"` is how Postgres spells an identifier
+  // with escapes, and the regex this check used to read its target with stopped
+  // at the `U` — it reported a write on a table called "u", found it under no
+  // rule, and let the statement through to write the governed one.
+  it.each([
+    ['UPDATE U&"_opportunity" SET "onemaStage" = :p0'],
+    ['UPDATE "workspace_test".U&"_opportunity" SET "onemaStage" = :p0'],
+    ['UPDATE U&"\\005Fopportunity" SET "onemaStage" = :p0'],
+    ['UPDATE U&"_opportunit\\+000079" SET "onemaStage" = :p0'],
+    [`UPDATE U&"!005Fopportunity" UESCAPE '!' SET "onemaStage" = :p0`],
+    ['DELETE FROM U&"\\0077orkspace_test".U&"_opportunity" WHERE true'],
+    [
+      'WITH settled AS (UPDATE U&"_opportunity" SET "onemaStage" = :p0 RETURNING "id") SELECT "id" FROM settled',
+    ],
+  ])('refuses %s on a governed object spelled with escapes', (sql) => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() => assertPermitted({ sql })).toThrow(
+      /"_opportunity" would write outside every hook/,
+    );
+  });
+
+  // And fail-closed for the rest: the decoding above is ours, not Postgres's, so
+  // "this one decodes to a table no rule names" is not an answer worth passing
+  it('refuses an ungoverned table spelled with escapes just the same', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'UPDATE U&"_campaignDelivery" SET "state" = :p0',
+      }),
+    ).toThrow(/Unicode-escaped identifier/);
+  });
+
+  // A doubled quote is one quote of the name, so the column it appears in must
+  // not shift what the target reads as
+  it('refuses a governed write whose column name carries a doubled quote', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'UPDATE "workspace_test"."_opportunity" SET "onema""Stage" = :p0',
+      }),
+    ).toThrow(/"_opportunity" would write outside every hook/);
+  });
+
+  // A string beside the target closes where Postgres closes it: an `E'…'` must
+  // not swallow the statement, and a `$$…$$` is a body nothing here can read
+  it.each([
+    [
+      `UPDATE "workspace_test"."_opportunity" SET "name" = E'\\\\' WHERE "id" = :p0`,
+      /"_opportunity" would write outside every hook/,
+    ],
+    [
+      `SELECT E'it''s'; DELETE FROM "workspace_test"."_opportunity" WHERE true`,
+      /"_opportunity" would write outside every hook/,
+    ],
+    [
+      'UPDATE "workspace_test"."_opportunity" SET "name" = $$ anything $$',
+      /a dollar-quoted body/,
+    ],
+  ])('refuses %s', (sql, reason) => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() => assertPermitted({ sql })).toThrow(reason);
+  });
+
+  // Fail-closed on the forms this does not understand, rather than on the half
+  // of the statement that happened to parse
+  it.each([
+    ['INSERT "workspace_test"."_campaignDelivery" ("id") VALUES (:p0)'],
+    ['UPDATE SET "x" = 1'],
+    ['COPY "workspace_test"."_campaignDelivery" ("id")'],
+    ['TRUNCATE TABLE "workspace_test"."_campaignDelivery", (:p0)'],
+  ])('refuses %s, whose target it cannot read', (sql) => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() => assertPermitted({ sql })).toThrow(
+      /target table could not be read/,
+    );
+  });
+
+  // The query of a `COPY … TO` may be a write with RETURNING, and that write is
+  // as real as one at the top level
+  it('refuses a governed write hidden in the query of a COPY that copies out', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'COPY (UPDATE "workspace_test"."_opportunity" SET "onemaStage" = :p0 RETURNING "id") TO STDOUT',
+      }),
+    ).toThrow(/"_opportunity" would write outside every hook/);
+  });
+
   // A keyword inside a literal or a comment is text, not a statement
   it('reads past a keyword that is only text', () => {
     setOnemaAccessRulesForTesting(governedRules);
