@@ -1,0 +1,74 @@
+name: Onema image
+
+# ONE-120: собственная сборка образа twenty для стендов Onema (ADR-003).
+# Только workflow_dispatch и пуш тегов onema-v* — не задевает существующие
+# workflow апстрима и не запускается на push/PR по коду.
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Тег образа (без 'onema-v', например 2.45.0-onema1)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - 'onema-v*'
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  build-and-push:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Resolve image tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF_NAME#onema-v}"
+          else
+            tag="${{ inputs.tag }}"
+            if [ -z "$tag" ]; then
+              tag="dev-$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA:0:7}"
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/salxdev97/twenty-onema:$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (server + frontend)
+        uses: docker/build-push-action@ee4ca427a2f43b6a16632044ca514c076267da23 # v6.19.0
+        with:
+          context: .
+          file: packages/twenty-docker/twenty/Dockerfile
+          target: twenty
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.vars.outputs.tag }}
+          tags: |
+            ${{ steps.vars.outputs.image }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/salxDev97/twenty
+            org.opencontainers.image.description=Onema build of Twenty (ADR-003, onema-access module)
+
+      - name: Summary
+        run: echo "Image: ${{ steps.vars.outputs.image }}" >> "$GITHUB_STEP_SUMMARY"
