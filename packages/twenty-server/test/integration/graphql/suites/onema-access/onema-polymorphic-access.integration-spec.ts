@@ -113,6 +113,9 @@ describe('onemaPolymorphicAccess', () => {
   let foreignNoteId: string;
   let ownedNoteTargetId: string;
   let foreignNoteTargetId: string;
+  const createdTaskTargetIdsOfJony: string[] = [];
+  let ownedTaskId: string;
+  let foreignTaskId: string;
   let ownedTaskTargetId: string;
   let foreignTaskTargetId: string;
   let ownedActivityId: string;
@@ -285,13 +288,21 @@ describe('onemaPolymorphicAccess', () => {
       data: { noteId: foreignNoteId, targetCompanyId: foreignCompanyId },
     });
 
-    const ownedTaskId = await createAsAdmin({
+    // The assignee is what the write-parent rule below reads: without it no
+    // rule of `task` tells the two tasks apart
+    ownedTaskId = await createAsAdmin({
       objectMetadataSingularName: 'task',
-      data: { title: `${SUITE_TAG} owned task` },
+      data: {
+        title: `${SUITE_TAG} owned task`,
+        assigneeId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+      },
     });
-    const foreignTaskId = await createAsAdmin({
+    foreignTaskId = await createAsAdmin({
       objectMetadataSingularName: 'task',
-      data: { title: `${SUITE_TAG} foreign task` },
+      data: {
+        title: `${SUITE_TAG} foreign task`,
+        assigneeId: WORKSPACE_MEMBER_DATA_SEED_IDS.PHIL,
+      },
     });
 
     ownedTaskTargetId = await createAsAdmin({
@@ -358,7 +369,11 @@ describe('onemaPolymorphicAccess', () => {
     });
     await destroyFixtureRecords({
       objectMetadataSingularName: 'taskTarget',
-      recordIds: [ownedTaskTargetId, foreignTaskTargetId],
+      recordIds: [
+        ownedTaskTargetId,
+        foreignTaskTargetId,
+        ...createdTaskTargetIdsOfJony,
+      ],
     });
     await destroyFixtureRecords({
       objectMetadataSingularName: 'note',
@@ -609,5 +624,43 @@ describe('onemaPolymorphicAccess', () => {
     expect(response.body.data.noteTargets.edges[0].node.targetCompanyId).toBe(
       ownedCompanyId,
     );
+  });
+
+  // rls-design §5, Б5 on a polymorphic row. A target row names two parents of
+  // different kinds: the card it points at, which its own `anyParent` rule
+  // reads, and the task it drags along, which no rule of `taskTarget` ever
+  // looks at. Point №4 alone says yes — the row sits on a card the member owns
+  // — so this is the one the declared link has to catch.
+  it('refuses a task target dragging a foreign task onto an owned record', async () => {
+    setOnemaAccessRulesForTesting({
+      ...polymorphicRules(),
+      objects: {
+        ...polymorphicRules().objects,
+        task: { member: { eq: ['assignee', '$me'] } },
+      },
+      writeRequiresParentAccess: {
+        taskTarget: [
+          { foreignKey: 'task', object: 'task' },
+          { foreignKey: 'targetCompany', object: 'company' },
+        ],
+      },
+    });
+
+    const createTaskTarget = (taskId: string) =>
+      makeRequestAsJony(
+        createOneOperationFactory({
+          objectMetadataSingularName: 'taskTarget',
+          gqlFields: 'id',
+          data: { taskId, targetCompanyId: secondOwnedCompanyId },
+        }),
+      );
+
+    expectRefused(await createTaskTarget(foreignTaskId));
+
+    const allowed = await createTaskTarget(ownedTaskId);
+
+    expect(allowed.body.errors).toBeUndefined();
+
+    createdTaskTargetIdsOfJony.push(allowed.body.data.createTaskTarget.id);
   });
 });
