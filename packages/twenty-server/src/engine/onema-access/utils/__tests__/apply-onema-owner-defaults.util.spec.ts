@@ -70,6 +70,25 @@ describe('applyOnemaOwnerDefaults', () => {
     ).toEqual([{ name: 'A lead', ownerId: WORKSPACE_MEMBER_ID }]);
   });
 
+  // An explicit null is a record nobody owns, which under the rule that names
+  // the default is a record its own author cannot see — so the default stands
+  // and the write succeeds, rather than being refused by the check after it
+  it.each([['owner'], ['ownerId']])(
+    'fills the owner over an explicit null written as "%s"',
+    (spelling) => {
+      setOnemaAccessRulesForTesting(ownedByMeRules);
+
+      expect(
+        applyOnemaOwnerDefaults({
+          scope,
+          records: [{ name: 'A lead', [spelling]: null }],
+        }),
+      ).toEqual([
+        { name: 'A lead', [spelling]: null, ownerId: WORKSPACE_MEMBER_ID },
+      ]);
+    },
+  );
+
   it('leaves an owner the caller named alone, by either spelling', () => {
     setOnemaAccessRulesForTesting(ownedByMeRules);
 

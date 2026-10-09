@@ -32,6 +32,8 @@ import { assertOnemaFrozenFieldsAreUnchanged } from 'src/engine/onema-access/uti
 import { assertOnemaProtectedFieldsAreWritable } from 'src/engine/onema-access/utils/assert-onema-protected-fields-are-writable.util';
 import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
 import { lockOnemaFrozenRecordsForUpdate } from 'src/engine/onema-access/utils/lock-onema-frozen-records.util';
+import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
+import { withOnemaReturnedIdColumn } from 'src/engine/onema-access/utils/with-onema-returned-id-column.util';
 import {
   isOnemaAccessPossiblyActive,
   type OnemaAccessScope,
@@ -297,6 +299,10 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       const records = await queryBuilder.getMany<ObjectRecord>();
       return records.map(({ id }) => id);
     } catch (error) {
+      // Onema fork (ADR-003): ONEMA_WRITE_DENIED deliberately does not land
+      // here. Upstream turns a denial into "these rows are not yours to write",
+      // which for an invariant of the product would drop the rows the rules
+      // refused and let the rest of the write go through silently.
       if (
         error instanceof PermissionsException &&
         error.code === PermissionsExceptionCode.PERMISSION_DENIED
@@ -1064,12 +1070,21 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     generatedMaps: ObjectRecord[];
     raw: ObjectRecord[];
   }> {
+    // Onema fork (ADR-003): the check after the write reads the ids out of what
+    // the statement returns, so the column is added to the list the write runs
+    // with rather than being demanded of the caller
+    const columnsToReturn = withOnemaReturnedIdColumn(args.columnsToReturn);
+
     return this.runWithValidationRules({
       inputRecordIds: args.records.map((record) => record.id),
       mutationKind: 'insert',
-      columnsToReturn: args.columnsToReturn,
+      columnsToReturn,
       write: (repository, validateWrittenRecords) =>
-        repository.performInsert({ ...args, validateWrittenRecords }),
+        repository.performInsert({
+          ...args,
+          columnsToReturn,
+          validateWrittenRecords,
+        }),
     });
   }
 
@@ -1189,12 +1204,18 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     generatedMaps: ObjectRecord[];
     raw: ObjectRecord[];
   }> {
+    const columnsToReturn = withOnemaReturnedIdColumn(args.columnsToReturn);
+
     return this.runWithValidationRules({
       inputRecordIds: args.inputs.map((input) => input.id),
       mutationKind: 'update',
-      columnsToReturn: args.columnsToReturn,
+      columnsToReturn,
       write: (repository, validateWrittenRecords) =>
-        repository.performBatchUpdate({ ...args, validateWrittenRecords }),
+        repository.performBatchUpdate({
+          ...args,
+          columnsToReturn,
+          validateWrittenRecords,
+        }),
     });
   }
 
@@ -1696,12 +1717,15 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     // A delete, a soft-delete or a restore by filter touches rows the check
     // after the write has to see, and the rollback it rests on needs the
     // transaction this opens (rls-design §11 «Запись», bulk rows)
+    const columnsToReturn = withOnemaReturnedIdColumn(args.columnsToReturn);
+
     return this.runWithValidationRules({
       mutationKind: args.kind,
-      columnsToReturn: args.columnsToReturn,
+      columnsToReturn,
       write: (repository, validateWrittenRecords) =>
         repository.performMutation({
           ...args,
+          columnsToReturn,
           selectQueryBuilder:
             repository === this
               ? args.selectQueryBuilder
@@ -1726,6 +1750,11 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     data?: Partial<ObjectRecord>;
     validateWrittenRecords?: ValidateWrittenRecords;
   }): Promise<ObjectRecord[]> {
+    // Onema fork (ADR-003): a soft delete and a restore write `deletedAt` and
+    // nothing else, and used to arrive here with an empty list — so a rule
+    // naming that field protected or frozen never saw them (rls-design §12а)
+    const onemaDeletedAtColumns = this.resolveOnemaDeletedAtWrite(kind);
+
     this.validateWriteIsPermitted({
       operationType: kind,
       columnsToReturn,
@@ -1733,7 +1762,7 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
         ? Object.keys(this.formatWriteData(data)).filter(
             (column) => column !== 'id',
           )
-        : [],
+        : Object.keys(onemaDeletedAtColumns ?? {}),
     });
 
     if (!rowLevelPermissionsApplied) {
@@ -1790,19 +1819,29 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       setColumns = columns;
     }
 
-    if (kind === 'update' && isDefined(setColumns)) {
-      const updatesWithRecordBefore = recordsBefore.map((rawRecordBefore) => ({
-        rawRecordBefore,
-        setColumns,
-      }));
+    // Onema fork (ADR-003), rls-design §12а Т-2. Every kind that writes columns
+    // goes through the freeze, not the update alone: putting a frozen record
+    // away and bringing it back are writes on `deletedAt`, and a rule that
+    // freezes that field means the record may not leave the state it reached.
+    const onemaFrozenSetColumns = isDefined(setColumns)
+      ? setColumns
+      : onemaDeletedAtColumns;
 
-      // Onema fork (ADR-003), rls-design §12а Т-2
+    if (isDefined(onemaFrozenSetColumns)) {
       await this.assertOnemaFrozenFieldsAreUnchangedUnderLock(
-        updatesWithRecordBefore,
+        recordsBefore.map((rawRecordBefore) => ({
+          rawRecordBefore,
+          setColumns: onemaFrozenSetColumns,
+        })),
       );
+    }
 
+    if (kind === 'update' && isDefined(setColumns)) {
       await this.validateRLSPredicatesForUpdatedRecords(
-        updatesWithRecordBefore,
+        recordsBefore.map((rawRecordBefore) => ({
+          rawRecordBefore,
+          setColumns,
+        })),
       );
     }
 
@@ -2281,11 +2320,40 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     assertOnemaFrozenFieldsAreUnchanged({
       scope: this.onemaAccessScope,
       updates: updates.map(({ rawRecordBefore, setColumns }) => ({
-        rawRecordBefore:
-          lockedRecordsById?.get(String(rawRecordBefore.id)) ?? rawRecordBefore,
+        // A row the lock did not return is a row this transaction does not hold:
+        // deleted by a concurrent writer, or never there. Comparing the
+        // unlocked snapshot instead is the race the lock exists for, so the
+        // write is refused rather than decided on a pre-image nothing pins.
+        rawRecordBefore: isDefined(lockedRecordsById)
+          ? (lockedRecordsById.get(String(rawRecordBefore.id)) ??
+            this.throwOnemaUnlockedRecord(String(rawRecordBefore.id)))
+          : rawRecordBefore,
         setColumns,
       })),
     });
+  }
+
+  private throwOnemaUnlockedRecord(recordId: string): never {
+    throw onemaWriteDenied(
+      `the "${this.options.tableShape.nameSingular}" record ${recordId} could not be locked for the freeze comparison`,
+    );
+  }
+
+  // Onema fork (ADR-003): what a soft delete or a restore is about to write.
+  // Returns undefined for every other kind, and for an object with no such
+  // column — there is then nothing of this shape to protect or freeze.
+  private resolveOnemaDeletedAtWrite(
+    kind: MutationKind,
+  ): Record<string, unknown> | undefined {
+    if (!this.options.tableShape.hasDeletedAtColumn) {
+      return undefined;
+    }
+
+    if (kind === 'soft-delete') {
+      return { deletedAt: new Date() };
+    }
+
+    return kind === 'restore' ? { deletedAt: null } : undefined;
   }
 
   // Onema fork (ADR-003): what our rules need from the repository, gathered in

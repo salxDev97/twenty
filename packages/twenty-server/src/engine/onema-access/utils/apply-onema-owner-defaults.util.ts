@@ -71,7 +71,14 @@ export const applyOnemaOwnerDefaults = <
 
   const recordsWithOwner = records.map((record) => {
     // Both spellings count as "the caller said who owns this": the ORM accepts
-    // the field name and the join column alike
+    // the field name and the join column alike.
+    //
+    // An explicit `null` is not one of them, and that is a decision rather than
+    // an oversight: a record of this object with no owner is invisible to the
+    // role the default exists for, so the check after the write would refuse the
+    // creation anyway (rls-design §3.3 point №5). Filling it in turns a refusal
+    // into a record its author can see; a role that may legitimately create an
+    // ownerless record is one the file names no owner default for.
     if (
       isDefined(record[ownerFieldName]) ||
       isDefined(record[ownerColumnName])
