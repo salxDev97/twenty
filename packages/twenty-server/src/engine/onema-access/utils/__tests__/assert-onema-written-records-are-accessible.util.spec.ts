@@ -1,7 +1,11 @@
 import {
+  APPLICATION_UNIVERSAL_IDENTIFIER,
   apiKeyAuthContext,
+  applicationAuthContext,
   buildTestAccessScope,
+  otherApplicationAuthContext,
   SALES_ROLE_UNIVERSAL_IDENTIFIER,
+  systemAuthContext,
   WORKSPACE_MEMBER_ID,
 } from 'src/engine/onema-access/__tests__/utils/build-test-access-scope.util';
 import { buildTestTableShape } from 'src/engine/onema-access/__tests__/utils/build-test-table-shape.util';
@@ -249,14 +253,25 @@ describe('assertOnemaWrittenRecordsAreAccessible', () => {
 
     const assertMembershipAccessible = (
       executeRaw: ReturnType<typeof buildExecuteRaw>,
+      {
+        authContext,
+        shouldBypassPermissionChecks = false,
+        returningColumns = ['id'],
+      }: {
+        authContext?: WorkspaceAuthContext;
+        shouldBypassPermissionChecks?: boolean;
+        returningColumns?: string[];
+      } = {},
     ) =>
       assertOnemaWrittenRecordsAreAccessible({
         scope: buildTestAccessScope({
           tableShape: projectMemberTableShape,
           tableShapes: [projectMemberTableShape, projectTableShape],
+          authContext,
+          shouldBypassPermissionChecks,
         }),
         writtenRecords: [{ id: 'membership-1' }],
-        returningColumns: ['id'],
+        returningColumns,
         mutationKind: 'insert',
         executeRaw,
       });
@@ -298,6 +313,88 @@ describe('assertOnemaWrittenRecordsAreAccessible', () => {
 
       expect(executeRaw).not.toHaveBeenCalled();
     });
+
+    // Б2. The bypass answers "may this actor see the row"; it does not answer
+    // "may this row be hung on that parent". A worker creating a membership in
+    // somebody else's project hands it over just as a sales role would.
+    it('still checks the parent for a caller holding the bypass', async () => {
+      setOnemaAccessRulesForTesting(membershipGrantsProjectRules);
+
+      await expect(
+        assertMembershipAccessible(buildExecuteRaw([]), {
+          authContext: systemAuthContext,
+          shouldBypassPermissionChecks: true,
+        }),
+      ).rejects.toThrow(
+        /membership-1 hang on a record their author may not see/,
+      );
+    });
+
+    // A worker holds no role, so no project is visible to it and the parent
+    // condition closes — which is the refusal above, reached by the other route
+    it('asks the parent check for the ids a bypassing write touched', async () => {
+      setOnemaAccessRulesForTesting(membershipGrantsProjectRules);
+
+      await expect(
+        assertMembershipAccessible(buildExecuteRaw([]), {
+          authContext: systemAuthContext,
+          shouldBypassPermissionChecks: true,
+          returningColumns: ['createdAt'],
+        }),
+      ).rejects.toThrow(/does not return the ids it touched/);
+    });
+
+    // The one actor the rules themselves name. Writing as the system is what
+    // rls-design §12а trusts, and the invariant is its own logic to keep.
+    it('waives the parent check for our application under the bypass', async () => {
+      setOnemaAccessRulesForTesting({
+        ...membershipGrantsProjectRules,
+        application: APPLICATION_UNIVERSAL_IDENTIFIER,
+      });
+
+      const executeRaw = buildExecuteRaw([]);
+
+      await assertMembershipAccessible(executeRaw, {
+        authContext: applicationAuthContext,
+        shouldBypassPermissionChecks: true,
+      });
+
+      expect(executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('waives nothing for another application under the bypass', async () => {
+      setOnemaAccessRulesForTesting({
+        ...membershipGrantsProjectRules,
+        application: APPLICATION_UNIVERSAL_IDENTIFIER,
+      });
+
+      await expect(
+        assertMembershipAccessible(buildExecuteRaw([]), {
+          authContext: otherApplicationAuthContext,
+          shouldBypassPermissionChecks: true,
+        }),
+      ).rejects.toThrow(
+        /membership-1 hang on a record their author may not see/,
+      );
+    });
+
+    // Only the bypass is waived for our application: acting as an ordinary
+    // caller it has a visible scope like anyone else, and the invariant costs
+    // it nothing it was entitled to
+    it('keeps the parent check for our application without the bypass', async () => {
+      setOnemaAccessRulesForTesting({
+        ...membershipGrantsProjectRules,
+        application: APPLICATION_UNIVERSAL_IDENTIFIER,
+      });
+
+      await expect(
+        assertMembershipAccessible(buildExecuteRaw([]), {
+          authContext: applicationAuthContext,
+        }),
+      ).rejects.toThrow(
+        /membership-1 hang on a record their author may not see/,
+      );
+    });
   });
 
   it('refuses every write while the rules file is unusable', async () => {
@@ -314,7 +411,9 @@ describe('assertOnemaWrittenRecordsAreAccessible', () => {
     ).rejects.toThrow(/Onema access rules refuse this write/);
   });
 
-  it('does nothing for a caller holding the explicit bypass', async () => {
+  // The visibility pass alone: "may this actor see the row" is the question the
+  // bypass has already answered. The invariant of Б5 is checked above.
+  it('skips the visibility pass for a caller holding the explicit bypass', async () => {
     setOnemaAccessRulesForTesting(taskFollowsItsProjectRules);
 
     const executeRaw = buildExecuteRaw([]);

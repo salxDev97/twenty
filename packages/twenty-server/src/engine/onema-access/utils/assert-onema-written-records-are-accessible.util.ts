@@ -11,6 +11,7 @@ import {
   compileOnemaRowAccess,
   compileOnemaWriteParentAccess,
 } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
+import { isOnemaApplicationActor } from 'src/engine/onema-access/utils/is-onema-application-actor.util';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
 import {
   type OnemaAccessScope,
@@ -51,9 +52,12 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
   mutationKind: MutationKind | 'insert';
   executeRaw: OnemaRawQueryExecutor;
 }): Promise<void> => {
+  // Resolved for the invariant, which is the wider of the two purposes: a bypass
+  // turns the visibility pass below off and leaves the parent pass on, so the
+  // rules still have to be loaded and validated for a write that bypasses
   const resolution = resolveOnemaAccess({
     scope,
-    purpose: 'record-visibility',
+    purpose: 'write-invariant',
   });
 
   if (resolution.kind === 'inactive') {
@@ -62,6 +66,30 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
 
   if (resolution.kind === 'refused') {
     throw onemaWriteDenied(resolution.reason);
+  }
+
+  const parents =
+    resolution.rules.writeRequiresParentAccess?.[scope.tableShape.nameSingular];
+
+  // Б2. "May this actor see the row" is a permission and a caller that asked for
+  // permissions to be bypassed has already answered it. "May this row be hung on
+  // that parent" is not: creating a membership on somebody else's project hands
+  // its holder everything the project carries, under a worker exactly as under a
+  // sales role, and the bypass buys no authority over it. The only actor exempt
+  // is the one the rules name — our application, writing as the system itself.
+  const isParentAccessRequired =
+    isDefined(parents) &&
+    !(
+      scope.shouldBypassPermissionChecks &&
+      isOnemaApplicationActor({
+        authContext: scope.authContext,
+        rules: resolution.rules,
+      })
+    );
+  const isVisibilityRequired = !scope.shouldBypassPermissionChecks;
+
+  if (!isParentAccessRequired && !isVisibilityRequired) {
+    return;
   }
 
   // The hole Б4 names: an empty list of written records used to end the check
@@ -98,28 +126,27 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
 
   const tableAlias = scope.tableShape.nameSingular;
 
-  await assertRecordIdsAreAdmitted({
-    scope,
-    tableAlias,
-    recordIds,
-    executeRaw,
-    rowAccess: compileOnemaRowAccess({
-      tableShape: scope.tableShape,
+  if (isVisibilityRequired) {
+    await assertRecordIdsAreAdmitted({
+      scope,
       tableAlias,
-      context: resolution.compilationContext,
-    }),
-    describeDenial: () =>
-      `the role may see no record of "${scope.tableShape.nameSingular}"`,
-    describeRefusal: (refusedRecordIds) =>
-      `the written "${scope.tableShape.nameSingular}" record(s) ${refusedRecordIds.join(
-        ', ',
-      )} would not be visible to their author`,
-  });
+      recordIds,
+      executeRaw,
+      rowAccess: compileOnemaRowAccess({
+        tableShape: scope.tableShape,
+        tableAlias,
+        context: resolution.compilationContext,
+      }),
+      describeDenial: () =>
+        `the role may see no record of "${scope.tableShape.nameSingular}"`,
+      describeRefusal: (refusedRecordIds) =>
+        `the written "${scope.tableShape.nameSingular}" record(s) ${refusedRecordIds.join(
+          ', ',
+        )} would not be visible to their author`,
+    });
+  }
 
-  const parents =
-    resolution.rules.writeRequiresParentAccess?.[scope.tableShape.nameSingular];
-
-  if (!isDefined(parents)) {
+  if (!isParentAccessRequired || !isDefined(parents)) {
     return;
   }
 

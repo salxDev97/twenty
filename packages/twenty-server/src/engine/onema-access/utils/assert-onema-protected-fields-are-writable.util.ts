@@ -1,13 +1,12 @@
 import { isDefined } from 'twenty-shared/utils';
 
-import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
+import { isOnemaApplicationActor } from 'src/engine/onema-access/utils/is-onema-application-actor.util';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
 import { resolveOnemaFieldColumnNames } from 'src/engine/onema-access/utils/resolve-onema-field-columns.util';
 import {
   type OnemaAccessScope,
   resolveOnemaAccess,
 } from 'src/engine/onema-access/utils/resolve-onema-access.util';
-import { type WorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 import { type WorkspaceTableShape } from 'src/engine/twenty-orm/table-shape/types/workspace-table-shape.type';
 
 // rls-design §12а Т-1: fields the product logic rests on — the approval mirrors,
@@ -47,7 +46,7 @@ export const assertOnemaProtectedFieldsAreWritable = ({
   }
 
   const writtenColumnNames = new Set(updatedColumns);
-  const isApplicationActor = isActingAsApplication({
+  const isApplicationActor = isOnemaApplicationActor({
     authContext: scope.authContext,
     rules: resolution.rules,
   });
@@ -109,17 +108,3 @@ const resolveProtectedColumnNames = ({
 
   return columnNames;
 };
-
-// Only the application's own context counts, never a person acting through it:
-// rls-design §12а is explicit that a record written under an application token
-// has no human actor, and that is exactly what makes the field trustworthy
-const isActingAsApplication = ({
-  authContext,
-  rules,
-}: {
-  authContext: WorkspaceAuthContext;
-  rules: OnemaAccessRules;
-}): boolean =>
-  authContext.type === 'application' &&
-  isDefined(rules.application) &&
-  authContext.application.universalIdentifier === rules.application;

@@ -36,12 +36,13 @@ export type OnemaAccessScope = {
 //   and a caller that built the repository asking for permissions to be bypassed
 //   has already answered it. A system actor holds no role, so enforcing it would
 //   close every write of every worker instead of protecting anything.
-// - `write-invariant` — "may this field still be written at all". Т-1 and Т-2 are
-//   invariants of the product, not permissions of an actor: the field the
-//   approval decision is read from must not move under a worker any more than
-//   under a sales role. The bypass buys no authority here, and the only actors
-//   exempt are the ones the rules file names — our application, by its
-//   universalIdentifier.
+// - `write-invariant` — "may this row still be written this way at all". Т-1,
+//   Т-2 and Б5 are invariants of the product, not permissions of an actor: the
+//   field the approval decision is read from must not move under a worker any
+//   more than under a sales role, and a membership created on somebody else's
+//   project hands over that project either way. The bypass buys no authority
+//   here, and the only actors exempt are the ones the rules file names — our
+//   application, by its universalIdentifier.
 export type OnemaAccessPurpose = 'record-visibility' | 'write-invariant';
 
 // `refused` carries no condition to apply: a rules file that stopped parsing, or
