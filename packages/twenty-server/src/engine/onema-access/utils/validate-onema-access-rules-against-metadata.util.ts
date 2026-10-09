@@ -7,9 +7,12 @@ import {
   type OnemaAccessRules,
   type OnemaCondition,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
+import { resolveOnemaFieldColumnNames } from 'src/engine/onema-access/utils/resolve-onema-field-columns.util';
 import { type WorkspaceTableShape } from 'src/engine/twenty-orm/table-shape/types/workspace-table-shape.type';
 
 const logger = new Logger(ONEMA_ACCESS_LOGGER_CONTEXT);
+
+const WORKSPACE_MEMBER_OBJECT_NAME = 'workspaceMember';
 
 export type OnemaRulesValidation =
   | { kind: 'valid' }
@@ -137,7 +140,197 @@ const collectProblems = ({
     }
   }
 
+  collectWriteProtectedFieldProblems({ rules, metadata, problems });
+  collectFreezeRuleProblems({ rules, metadata, problems });
+  collectOwnerDefaultProblems({ rules, metadata, problems });
+  collectWriteParentProblems({ rules, metadata, problems });
+
   return problems;
+};
+
+// A mistyped foreign key here leaves the access-granting link wide open, which
+// is the same silence as a mistyped protected field one level up (Б5)
+const collectWriteParentProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  for (const [objectName, parents] of Object.entries(
+    rules.writeRequiresParentAccess ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `writeRequiresParentAccess names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    for (const parent of parents) {
+      const parentTableShape = resolveTableShape({
+        objectName: parent.object,
+        metadata,
+      });
+
+      if (!isDefined(parentTableShape)) {
+        problems.push(
+          `writeRequiresParentAccess: "${parent.object}" is not an object of this workspace`,
+        );
+
+        continue;
+      }
+
+      collectRelationProblems({
+        ownerTableShape: tableShape,
+        fieldName: parent.foreignKey,
+        expectedTargetTableShape: parentTableShape,
+        describe: (problem) => `writeRequiresParentAccess: ${problem}`,
+        problems,
+      });
+    }
+  }
+};
+
+// The substituted value is a workspaceMember id, so a default on anything but a
+// relation to workspaceMember would write an id of the wrong object into the
+// column — and the rule reading it would then quietly match nothing
+const collectOwnerDefaultProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  const workspaceMemberTableShape = resolveTableShape({
+    objectName: WORKSPACE_MEMBER_OBJECT_NAME,
+    metadata,
+  });
+
+  for (const [objectName, fieldNameByRoleKey] of Object.entries(
+    rules.ownerDefaults ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `ownerDefaults names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    if (!isDefined(workspaceMemberTableShape)) {
+      problems.push(
+        `ownerDefaults needs "${WORKSPACE_MEMBER_OBJECT_NAME}", which this workspace does not have`,
+      );
+
+      return;
+    }
+
+    for (const fieldName of Object.values(fieldNameByRoleKey)) {
+      collectRelationProblems({
+        ownerTableShape: tableShape,
+        fieldName,
+        expectedTargetTableShape: workspaceMemberTableShape,
+        describe: (problem) => `ownerDefaults: ${problem}`,
+        problems,
+      });
+    }
+  }
+};
+
+// A protected or frozen field named with a typo protects nothing, which is the
+// same silent opening as a mistyped object name — and here the field is the one
+// the whole product rule rests on (rls-design §12а)
+const collectWriteProtectedFieldProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  for (const [objectName, roleKeysByFieldName] of Object.entries(
+    rules.writeProtectedFields ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `writeProtectedFields names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    for (const fieldName of Object.keys(roleKeysByFieldName)) {
+      if (
+        resolveOnemaFieldColumnNames({ tableShape, fieldName }).length === 0
+      ) {
+        problems.push(
+          `writeProtectedFields: "${fieldName}" is no field of "${objectName}"`,
+        );
+      }
+    }
+  }
+};
+
+const collectFreezeRuleProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  for (const [objectName, freezeRules] of Object.entries(
+    rules.freezeWhen ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `freezeWhen names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    for (const freezeRule of freezeRules) {
+      // The condition is compared against one stored value, so a composite
+      // field — which is several columns — cannot carry it
+      if (
+        resolveOnemaFieldColumnNames({
+          tableShape,
+          fieldName: freezeRule.field,
+        }).length !== 1
+      ) {
+        problems.push(
+          `freezeWhen: "${freezeRule.field}" is no single-column field of "${objectName}"`,
+        );
+      }
+
+      for (const fieldName of freezeRule.fields) {
+        if (
+          resolveOnemaFieldColumnNames({ tableShape, fieldName }).length === 0
+        ) {
+          problems.push(
+            `freezeWhen: "${fieldName}" is no field of "${objectName}"`,
+          );
+        }
+      }
+    }
+  }
 };
 
 const collectConditionProblems = ({

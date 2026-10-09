@@ -54,6 +54,12 @@ export enum PermissionsExceptionCode {
   ROLE_CANNOT_BE_ASSIGNED_TO_AGENTS = 'ROLE_CANNOT_BE_ASSIGNED_TO_AGENTS',
   APPLICATION_ROLE_NOT_FOUND = 'APPLICATION_ROLE_NOT_FOUND',
   ROLE_BELONGS_TO_ANOTHER_APPLICATION = 'ROLE_BELONGS_TO_ANOTHER_APPLICATION',
+  // Onema fork (ADR-003): an invariant of the product, not a permission of the
+  // actor. It reaches the caller as the same 403, and it is distinguishable from
+  // an ordinary denial for any `catch` that has to tell the two apart — the one
+  // in resolveWritableRecordIds swallows a denial into an empty list, which for
+  // an invariant would quietly drop rows instead of refusing the write.
+  ONEMA_WRITE_DENIED = 'ONEMA_WRITE_DENIED',
 }
 
 const getPermissionsExceptionUserFriendlyMessage = (
@@ -158,6 +164,8 @@ const getPermissionsExceptionUserFriendlyMessage = (
       return msg`No role assigned to the application.`;
     case PermissionsExceptionCode.ROLE_BELONGS_TO_ANOTHER_APPLICATION:
       return msg`Cannot target a role owned by another application.`;
+    case PermissionsExceptionCode.ONEMA_WRITE_DENIED:
+      return msg`This change is not allowed on this record.`;
     default:
       assertUnreachable(code);
   }

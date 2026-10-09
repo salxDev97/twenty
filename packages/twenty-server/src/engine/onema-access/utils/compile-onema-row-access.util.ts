@@ -8,11 +8,13 @@ import {
   OnemaAccessException,
   OnemaAccessExceptionCode,
 } from 'src/engine/onema-access/exceptions/onema-access.exception';
+import { closesOnemaRuleCycle } from 'src/engine/onema-access/utils/closes-onema-rule-cycle.util';
 import {
   type OnemaAccessRules,
   type OnemaAccessSubject,
   type OnemaCondition,
   type OnemaConditionValue,
+  type OnemaParentCondition,
   type OnemaRowAccess,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { type SqlCondition } from 'src/engine/twenty-orm/types/row-access-policy.type';
@@ -45,6 +47,14 @@ type CompilationState = {
   context: OnemaCompilationContext;
   namePrefix: string;
   nextIndex: number;
+  // A write-parent chain starts at the row being written, which is not a rule of
+  // anything: when the parent's own rule reaches that object again it reads
+  // *other* rows of it, under their own rule, and stops there. Treating that as
+  // a cycle dropped the one rule that mattered — `projectMember -> project ->
+  // projectMember` is how a contractor sees the project at all, so the check
+  // refused them the membership they were entitled to create. Depth still bounds
+  // the walk, so nothing here can run away.
+  cycleExemptObjectName?: string;
 };
 
 export const buildOnemaCompilationContext = ({
@@ -90,6 +100,82 @@ export const compileOnemaRowAccess = ({
     },
   });
 };
+
+// rls-design §5, Б5. Writing a row that hangs off a parent is a write on who
+// can see that parent — a membership row names a project, and creating one
+// hands its holder everything the project carries. The row's own rule cannot
+// catch this: `projectMember` has no rule of its own, and `eq assignee $me` is
+// satisfied by the very write that grants the access.
+//
+// So the parent named by each declared foreign key has to be admitted by its own
+// rule, for the same author, in the same transaction. A row that names no parent
+// grants nobody anything and is left alone.
+export const compileOnemaWriteParentAccess = ({
+  tableShape,
+  tableAlias,
+  parents,
+  context,
+}: {
+  tableShape: WorkspaceTableShape;
+  tableAlias: string;
+  parents: OnemaParentCondition[];
+  context: OnemaCompilationContext;
+}): OnemaRowAccess => {
+  const parameterNamespace = nextParameterNamespace;
+
+  nextParameterNamespace += 1;
+
+  const state: CompilationState = {
+    context,
+    namePrefix: `${ONEMA_PARAMETER_PREFIX}_${parameterNamespace}_${sanitizeNamePart(
+      tableAlias,
+    )}_parent`,
+    nextIndex: 0,
+    cycleExemptObjectName: tableShape.nameSingular,
+  };
+
+  return combineRowAccess(
+    parents.map((parent) => {
+      const foreignKeyIsEmpty = `${quoteColumn(
+        tableAlias,
+        resolveColumnName({ tableShape, fieldName: parent.foreignKey }),
+      )} IS NULL`;
+      const parentAccess = compileParent({
+        condition: { parent },
+        tableShape,
+        tableAlias,
+        objectPath: [tableShape.nameSingular],
+        state,
+      });
+
+      if (parentAccess.kind === 'open') {
+        return parentAccess;
+      }
+
+      // "The role may see no parent of this kind" still leaves a row with no
+      // parent at all, which grants nobody anything
+      if (parentAccess.kind === 'denied') {
+        return {
+          kind: 'gated',
+          condition: { sql: foreignKeyIsEmpty, parameters: {} },
+        } satisfies OnemaRowAccess;
+      }
+
+      return {
+        kind: 'gated',
+        condition: {
+          sql: `(${foreignKeyIsEmpty} OR (${parentAccess.condition.sql}))`,
+          parameters: parentAccess.condition.parameters,
+        },
+      } satisfies OnemaRowAccess;
+    }),
+    'AND',
+  );
+};
+
+export const combineOnemaRowAccess = (
+  accesses: OnemaRowAccess[],
+): OnemaRowAccess => combineRowAccess(accesses, 'AND');
 
 // An object listed in the rules is closed to every role the rules do not name;
 // an object absent from the rules keeps upstream object and field permissions
@@ -250,7 +336,11 @@ const compileExists = ({
   const nextObjectPath = [...objectPath, targetTableShape.nameSingular];
 
   if (
-    objectPath.includes(targetTableShape.nameSingular) ||
+    closesACycle({
+      objectPath,
+      objectName: targetTableShape.nameSingular,
+      state,
+    }) ||
     nextObjectPath.length > ONEMA_MAX_RULE_DEPTH
   ) {
     return { kind: 'denied' };
@@ -349,7 +439,11 @@ const compileParent = ({
   const nextObjectPath = [...objectPath, parentTableShape.nameSingular];
 
   if (
-    objectPath.includes(parentTableShape.nameSingular) ||
+    closesACycle({
+      objectPath,
+      objectName: parentTableShape.nameSingular,
+      state,
+    }) ||
     nextObjectPath.length > ONEMA_MAX_RULE_DEPTH
   ) {
     return { kind: 'denied' };
@@ -500,6 +594,21 @@ const resolveColumnName = ({
     OnemaAccessExceptionCode.UNKNOWN_FIELD,
   );
 };
+
+const closesACycle = ({
+  objectPath,
+  objectName,
+  state,
+}: {
+  objectPath: string[];
+  objectName: string;
+  state: CompilationState;
+}): boolean =>
+  closesOnemaRuleCycle({
+    objectPath,
+    objectName,
+    cycleExemptObjectName: state.cycleExemptObjectName,
+  });
 
 const quoteColumn = (alias: string, columnName: string): string =>
   `${escapeIdentifier(alias)}.${escapeIdentifier(columnName)}`;

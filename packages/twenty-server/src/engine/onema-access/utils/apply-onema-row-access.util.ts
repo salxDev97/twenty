@@ -1,25 +1,20 @@
 import { Logger } from '@nestjs/common';
 import { isDefined } from 'twenty-shared/utils';
 
-import { type WorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 import {
   ONEMA_ACCESS_LOGGER_CONTEXT,
   ONEMA_ALWAYS_FALSE_CONDITION,
   ONEMA_ROW_ACCESS_MARK_PREFIX,
 } from 'src/engine/onema-access/constants/onema-access.constants';
 import { type OnemaRowAccess } from 'src/engine/onema-access/types/onema-access-rules.type';
-import { validateOnemaAccessRulesAgainstMetadata } from 'src/engine/onema-access/utils/validate-onema-access-rules-against-metadata.util';
 import {
-  buildOnemaCompilationContext,
   compileOnemaRowAccess,
   type OnemaCompilationContext,
 } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import {
-  getOnemaAccessRulesState,
-  isOnemaAccessEnforced,
-} from 'src/engine/onema-access/utils/load-onema-access-rules.util';
-import { resolveOnemaAccessSubject } from 'src/engine/onema-access/utils/resolve-onema-access-subject.util';
-import { type WorkspaceInternalContext } from 'src/engine/twenty-orm/interfaces/workspace-internal-context.interface';
+  type OnemaAccessScope,
+  resolveOnemaAccess,
+} from 'src/engine/onema-access/utils/resolve-onema-access.util';
 import { type WorkspaceSelectQueryBuilder } from 'src/engine/twenty-orm/query-builder/workspace-select-query-builder';
 import { type WorkspaceTableShape } from 'src/engine/twenty-orm/table-shape/types/workspace-table-shape.type';
 
@@ -30,75 +25,32 @@ const logger = new Logger(ONEMA_ACCESS_LOGGER_CONTEXT);
 // the criteria of updates and deletes are all narrowed by the same predicate
 export const applyOnemaRowAccess = ({
   queryBuilder,
-  tableShape,
-  authContext,
-  internalContext,
-  tableShapeByObjectMetadataId,
+  scope,
 }: {
   queryBuilder: WorkspaceSelectQueryBuilder;
-  tableShape: WorkspaceTableShape;
-  authContext: WorkspaceAuthContext;
-  internalContext: WorkspaceInternalContext;
-  tableShapeByObjectMetadataId: (
-    objectMetadataId: string,
-  ) => WorkspaceTableShape;
+  scope: OnemaAccessScope;
 }): void => {
-  const rulesState = getOnemaAccessRulesState();
+  const resolution = resolveOnemaAccess({
+    scope,
+    purpose: 'record-visibility',
+  });
 
-  if (rulesState.kind === 'absent') {
+  if (resolution.kind === 'inactive') {
     return;
   }
 
-  // Release gate (ADR-003): rules are read and validated whether or not they are
-  // applied, so a stand can load the real file long before ONE-111…113 make
-  // enforcement safe. The testing bridge carries its own enforcement, since the
-  // app under integration test does not see the environment the test sets.
-  if (!rulesState.isTestingOverride && !isOnemaAccessEnforced()) {
-    return;
-  }
-
-  if (rulesState.kind === 'failed') {
+  if (resolution.kind === 'refused') {
     denyWholeQuery(queryBuilder);
 
     return;
   }
 
-  const rules = rulesState.rules;
-  const validation = validateOnemaAccessRulesAgainstMetadata({
-    rules,
-    rulesVersion: rulesState.contentHash,
-    flatObjectMetadataMaps: internalContext.flatObjectMetadataMaps,
-    metadata: {
-      objectIdByNameSingular: internalContext.objectIdByNameSingular,
-      tableShapeByObjectMetadataId,
-      flatRoleMaps: internalContext.flatRoleMaps,
-    },
-  });
-
-  if (validation.kind === 'invalid') {
-    denyWholeQuery(queryBuilder);
-
-    return;
-  }
-
-  const subject = resolveOnemaAccessSubject({
-    authContext,
-    userWorkspaceRoleMap: internalContext.userWorkspaceRoleMap,
-    apiKeyRoleMap: internalContext.apiKeyRoleMap,
-    flatRoleMaps: internalContext.flatRoleMaps,
-  });
-
-  const context = buildOnemaCompilationContext({
-    rules,
-    subject,
-    objectIdByNameSingular: internalContext.objectIdByNameSingular,
-    tableShapeByObjectMetadataId,
-  });
+  const context = resolution.compilationContext;
 
   applyForAlias({
     queryBuilder,
     alias: queryBuilder.alias,
-    tableShape,
+    tableShape: scope.tableShape,
     context,
   });
 

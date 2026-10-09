@@ -17,6 +17,8 @@ export const permissionRestApiExceptionCodeToHttpStatus = (
     case PermissionsExceptionCode.ROLE_NOT_EDITABLE:
     case PermissionsExceptionCode.CANNOT_ADD_OBJECT_PERMISSION_ON_SYSTEM_OBJECT:
     case PermissionsExceptionCode.CANNOT_ADD_FIELD_PERMISSION_ON_SYSTEM_OBJECT:
+    // Onema fork (ADR-003): a refused write is a 403 like any other refusal
+    case PermissionsExceptionCode.ONEMA_WRITE_DENIED:
       return 403;
     case PermissionsExceptionCode.INVALID_ARG:
     case PermissionsExceptionCode.INVALID_SETTING:

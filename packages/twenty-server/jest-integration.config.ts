@@ -30,6 +30,11 @@ const jestConfig: JestConfigWithTsJest = {
     ...(isClickhouseEnabled ? [] : ['<rootDir>/test/integration/audit']),
     // Needs a secure-deployment app; runs via jest-integration-secure.config.ts (nx test:integration:secure)
     '<rootDir>/test/integration/secure-deployment',
+    // Onema fork (ADR-003): the freeze race of rls-design §12а Т-2 reads what
+    // the scheduler did with concurrent mutations, so it is probabilistic and
+    // stays out of the mandatory run; jest-integration-onema-race.config.ts
+    // (nx test:integration:onema-race) runs it
+    '<rootDir>/test/integration/onema-race',
   ],
   testRegex: '\\.integration-spec\\.ts$',
   modulePathIgnorePatterns: ['<rootDir>/dist'],

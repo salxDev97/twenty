@@ -33,10 +33,22 @@ export const onemaConditionSchema: z.ZodType<OnemaCondition> = z.lazy(() =>
   ]),
 );
 
+const onemaFreezeRuleSchema = z.strictObject({
+  field: z.string().min(1),
+  equals: onemaConditionValueSchema,
+  fields: z.array(z.string().min(1)).min(1),
+  // Absent means "the condition may still be cleared", which is the weaker of
+  // the two and has to be the one spelled out by silence
+  isIrreversible: z.boolean().optional(),
+});
+
 export const onemaAccessRulesSchema = z.strictObject({
   // The value is a role universalIdentifier, which is a uuid for the roles
   // Twenty ships but a free-form string for the ones an application declares
   roles: z.record(z.string().min(1), z.string().min(1)),
+  // Optional because a file may protect no field at all; demanded by
+  // parse-onema-access-rules as soon as writeProtectedFields names one
+  application: z.string().min(1).optional(),
   // Objects that must carry a rule. An object missing from `objects` falls back
   // to upstream object and field permissions, which is indistinguishable from
   // "nobody has written its rule yet"; naming it here turns that silence into a
@@ -47,4 +59,36 @@ export const onemaAccessRulesSchema = z.strictObject({
     z.string().min(1),
     z.record(z.string().min(1), onemaConditionSchema),
   ),
+  // Mandatory for the same reason as requiredObjects: "we protect nothing" and
+  // "we forgot the key" have to look different in the file. Both are written
+  // out as `{}` when there is nothing to say.
+  writeProtectedFields: z.record(
+    z.string().min(1),
+    z.record(z.string().min(1), z.array(z.string().min(1))),
+  ),
+  // An object listed with no freeze rule is an unfinished edit, not a decision
+  freezeWhen: z.record(
+    z.string().min(1),
+    z.array(onemaFreezeRuleSchema).min(1),
+  ),
+  // Mandatory and `{}` for "no link grants access", for the same reason as
+  // writeProtectedFields: a forgotten key leaves every one of them open
+  writeRequiresParentAccess: z.record(
+    z.string().min(1),
+    z
+      .array(
+        z.strictObject({
+          foreignKey: z.string().min(1),
+          object: z.string().min(1),
+        }),
+      )
+      .min(1),
+  ),
+  // Object -> role key -> the relation that holds the owner. Optional, unlike
+  // the keys above, because forgetting it hides nothing: a record created
+  // without its owner is refused by the check after the write, loudly, where a
+  // forgotten writeProtectedFields would quietly protect nothing at all
+  ownerDefaults: z
+    .record(z.string().min(1), z.record(z.string().min(1), z.string().min(1)))
+    .optional(),
 });

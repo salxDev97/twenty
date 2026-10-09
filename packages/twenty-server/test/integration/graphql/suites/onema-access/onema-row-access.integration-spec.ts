@@ -1,5 +1,10 @@
 import gql from 'graphql-tag';
 import { default as request } from 'supertest';
+import {
+  createFixtureCompany,
+  createFixturePerson,
+  destroyFixtureRecords,
+} from 'test/integration/graphql/suites/onema-access/utils/onema-access-fixtures.util';
 import { deleteOneOperationFactory } from 'test/integration/graphql/utils/delete-one-operation-factory.util';
 import { findManyOperationFactory } from 'test/integration/graphql/utils/find-many-operation-factory.util';
 import { findOneOperationFactory } from 'test/integration/graphql/utils/find-one-operation-factory.util';
@@ -14,20 +19,36 @@ import {
   type OnemaCondition,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { setOnemaAccessRulesForTesting } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
-import { COMPANY_DATA_SEED_IDS } from 'src/engine/workspace-manager/dev-seeder/data/constants/company-data-seeds.constant';
 import { WORKSPACE_MEMBER_DATA_SEED_IDS } from 'src/engine/workspace-manager/dev-seeder/data/constants/workspace-member-data-seeds.constant';
 
 const client = request(`http://localhost:${APP_PORT}`);
 
-// A handful of seeded companies: two of them have Jony as account owner
-const COMPANY_IDS_UNDER_TEST = [
-  COMPANY_DATA_SEED_IDS.ID_1,
-  COMPANY_DATA_SEED_IDS.ID_2,
-  COMPANY_DATA_SEED_IDS.ID_3,
-  COMPANY_DATA_SEED_IDS.ID_8,
+// Four companies of the suite's own: two have Jony as account owner, two have
+// Phil, and each pair carries one person. Every query of this file is narrowed
+// to them, so nothing here depends on what else lives in the workspace
+const COMPANY_FIXTURES = [
+  {
+    name: 'Onema row access (owned)',
+    ownerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+  },
+  {
+    name: 'Onema row access (owned, second)',
+    ownerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+  },
+  {
+    name: 'Onema row access (foreign)',
+    ownerId: WORKSPACE_MEMBER_DATA_SEED_IDS.PHIL,
+  },
+  {
+    name: 'Onema row access (foreign, second)',
+    ownerId: WORKSPACE_MEMBER_DATA_SEED_IDS.PHIL,
+  },
 ];
 
-const companyFilter = { id: { in: COMPANY_IDS_UNDER_TEST } };
+let companyIdsUnderTest: string[] = [];
+let personIdsUnderTest: string[] = [];
+
+const companyFilter = () => ({ id: { in: companyIdsUnderTest } });
 
 const findCompanies = async () => {
   const response = await makeRequestAsJony(
@@ -35,7 +56,7 @@ const findCompanies = async () => {
       objectMetadataSingularName: 'company',
       objectMetadataPluralName: 'companies',
       gqlFields: 'id name accountOwner { id }',
-      filter: companyFilter,
+      filter: companyFilter(),
     }),
   );
 
@@ -57,7 +78,7 @@ const countCompanies = async () => {
         }
       }
     `,
-    variables: { filter: companyFilter },
+    variables: { filter: companyFilter() },
   });
 
   expect(response.body.errors).toBeUndefined();
@@ -73,7 +94,7 @@ const findPeople = async (): Promise<
       objectMetadataSingularName: 'person',
       objectMetadataPluralName: 'people',
       gqlFields: 'id company { id name }',
-      filter: { company: { id: { in: COMPANY_IDS_UNDER_TEST } } },
+      filter: { company: companyFilter() },
       first: 200,
     }),
   );
@@ -91,7 +112,7 @@ const findPeopleOrderedByCompany = async (): Promise<{ id: string }[]> => {
       objectMetadataSingularName: 'person',
       objectMetadataPluralName: 'people',
       gqlFields: 'id',
-      filter: { company: { id: { in: COMPANY_IDS_UNDER_TEST } } },
+      filter: { company: companyFilter() },
       orderBy: [{ company: { name: 'AscNullsLast' } }],
       first: 200,
     }),
@@ -112,7 +133,7 @@ const findCompaniesWithPeople = async (): Promise<
       objectMetadataSingularName: 'company',
       objectMetadataPluralName: 'companies',
       gqlFields: 'id name people { edges { node { id } } }',
-      filter: companyFilter,
+      filter: companyFilter(),
     }),
   );
 
@@ -131,7 +152,7 @@ const groupCompaniesByName = async () => {
       objectMetadataSingularName: 'company',
       objectMetadataPluralName: 'companies',
       groupBy: [{ name: true }],
-      filter: companyFilter,
+      filter: companyFilter(),
       limit: 100,
     }),
   );
@@ -206,10 +227,35 @@ describe('onemaRowAccess', () => {
 
     expect(memberRoleUniversalIdentifier).toBeDefined();
 
-    // Expectations come from the unfiltered view, so the test does not restate
-    // which seeded company belongs to whom
     setOnemaAccessRulesForTesting(undefined);
 
+    const createdCompanies = [];
+
+    for (const { name, ownerId } of COMPANY_FIXTURES) {
+      createdCompanies.push(
+        await createFixtureCompany({ name, accountOwnerId: ownerId }),
+      );
+    }
+
+    companyIdsUnderTest = createdCompanies.map((company) => company.id);
+
+    // One person on a company of Jony and one on a company of Phil: the child
+    // rule is only worth asserting while both sides of it have a row
+    const createdPeople = [];
+
+    for (const companyId of [createdCompanies[0].id, createdCompanies[2].id]) {
+      createdPeople.push(
+        await createFixturePerson({
+          jobTitle: 'Onema row access',
+          companyId,
+        }),
+      );
+    }
+
+    personIdsUnderTest = createdPeople.map((person) => person.id);
+
+    // Expectations come from the unfiltered view, so the test does not restate
+    // which company belongs to whom
     const companies = await findCompanies();
 
     allCompanyNames = companies.map(
@@ -238,6 +284,19 @@ describe('onemaRowAccess', () => {
 
     expect(ownedCompanyNames.length).toBeGreaterThan(0);
     expect(ownedCompanyNames.length).toBeLessThan(allCompanyNames.length);
+  });
+
+  afterAll(async () => {
+    setOnemaAccessRulesForTesting(undefined);
+
+    await destroyFixtureRecords({
+      objectMetadataSingularName: 'person',
+      recordIds: personIdsUnderTest,
+    });
+    await destroyFixtureRecords({
+      objectMetadataSingularName: 'company',
+      recordIds: companyIdsUnderTest,
+    });
   });
 
   afterEach(() => setOnemaAccessRulesForTesting(undefined));

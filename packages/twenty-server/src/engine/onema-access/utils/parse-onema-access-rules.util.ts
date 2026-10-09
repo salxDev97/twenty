@@ -14,6 +14,8 @@ import {
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { onemaAccessRulesSchema } from 'src/engine/onema-access/utils/onema-access-rules.schema';
 
+const CURRENT_MEMBER_TOKEN = '$me';
+
 // A rules file that does not parse must stop the server, never degrade to a
 // permissive default (ADR-003: closed by default)
 export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
@@ -34,8 +36,102 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
   validateRoleKeysAreDeclared(rules);
   validateRequiredObjectsHaveRules(rules);
   validateObjectChains(rules);
+  validateWriteParentChains(rules);
+  validateWriteProtectedFields(rules);
+  validateFreezeRules(rules);
+  validateOwnerDefaults(rules);
 
   return rules;
+};
+
+// rls-design §3.3 point №5. A default is only ever useful where the rule reads
+// that very field as "mine": filling anything else hands out ownership no rule
+// looks at, and filling a field the role does not need leaves the record
+// visible to it for a reason the file never stated.
+const validateOwnerDefaults = (rules: OnemaAccessRules): void => {
+  for (const [objectName, fieldNameByRoleKey] of Object.entries(
+    rules.ownerDefaults ?? {},
+  )) {
+    for (const [roleKey, fieldName] of Object.entries(fieldNameByRoleKey)) {
+      if (!isDefined(rules.roles[roleKey])) {
+        throw new OnemaAccessException(
+          `Onema access rules fill the owner of "${objectName}" for role "${roleKey}" without declaring its role id`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+
+      const condition = rules.objects[objectName]?.[roleKey];
+
+      if (
+        !isDefined(condition) ||
+        !('eq' in condition) ||
+        condition.eq[0] !== fieldName ||
+        condition.eq[1] !== CURRENT_MEMBER_TOKEN
+      ) {
+        throw new OnemaAccessException(
+          `Onema access rules fill "${objectName}.${fieldName}" for role "${roleKey}", whose rule is not "${fieldName} is $me"`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+    }
+  }
+};
+
+// rls-design §12а Т-1: a protected field is one only our application writes, so
+// a file that names such a field without naming the application has described a
+// rule nothing can ever satisfy — and would quietly freeze the field for good
+const validateWriteProtectedFields = (rules: OnemaAccessRules): void => {
+  const fieldsByObjectName = Object.entries(rules.writeProtectedFields ?? {});
+
+  if (fieldsByObjectName.length > 0 && !isDefined(rules.application)) {
+    throw new OnemaAccessException(
+      'Onema access rules protect fields but declare no "application": nothing would ever be allowed to write them',
+      OnemaAccessExceptionCode.INVALID_RULES,
+    );
+  }
+
+  for (const [objectName, roleKeysByFieldName] of fieldsByObjectName) {
+    for (const [fieldName, roleKeys] of Object.entries(roleKeysByFieldName)) {
+      for (const roleKey of roleKeys) {
+        if (!isDefined(rules.roles[roleKey])) {
+          throw new OnemaAccessException(
+            `Onema access rules let role "${roleKey}" write protected field "${objectName}.${fieldName}" without declaring its role id`,
+            OnemaAccessExceptionCode.INVALID_RULES,
+          );
+        }
+      }
+    }
+  }
+};
+
+// rls-design §12а Т-2. Freezing the field the condition reads is allowed on
+// purpose — that is how a stage becomes final — and two rules may freeze one
+// field under two conditions; a field repeated inside one rule is a slip
+const validateFreezeRules = (rules: OnemaAccessRules): void => {
+  for (const [objectName, freezeRules] of Object.entries(
+    rules.freezeWhen ?? {},
+  )) {
+    for (const freezeRule of freezeRules) {
+      if (new Set(freezeRule.fields).size !== freezeRule.fields.length) {
+        throw new OnemaAccessException(
+          `Onema access rules freeze a field of "${objectName}" twice in one rule on "${freezeRule.field}"`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+
+      // The latch already freezes the condition field, so naming it again is
+      // the same slip as any other repetition
+      if (
+        freezeRule.isIrreversible &&
+        freezeRule.fields.includes(freezeRule.field)
+      ) {
+        throw new OnemaAccessException(
+          `Onema access rules freeze the condition field "${objectName}.${freezeRule.field}" twice: "isIrreversible" already does it`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+    }
+  }
 };
 
 // The two ways a listed object can end up with no usable rule, both of which
@@ -129,6 +225,35 @@ const validateObjectChains = (rules: OnemaAccessRules): void => {
   }
 };
 
+// Б5 links are compiled into the same joins as a rule and were walked by
+// nothing: a link too deep, or one that closes a cycle, turned into a silent
+// `denied` at compile time, and a silent `denied` on a write-parent check reads
+// as "this foreign key must stay empty" — the author is told their row may hang
+// on nothing at all. The walk makes it a refusal of the file instead.
+const validateWriteParentChains = (rules: OnemaAccessRules): void => {
+  for (const [objectName, parents] of Object.entries(
+    rules.writeRequiresParentAccess ?? {},
+  )) {
+    for (const parent of parents) {
+      const nextObjectPath = enterObject({
+        objectName: parent.object,
+        objectPath: [objectName],
+        cycleExemptObjectName: objectName,
+        describeRule: `"${objectName}" and its writeRequiresParentAccess link "${parent.foreignKey}"`,
+      });
+
+      walkObject({
+        objectName: parent.object,
+        rules,
+        objectPath: nextObjectPath,
+        cycleExemptObjectName: objectName,
+        budget: { remainingConditions: ONEMA_MAX_CONDITIONS_PER_RULE },
+        describeRule: `"${objectName}" and its writeRequiresParentAccess link "${parent.foreignKey}"`,
+      });
+    }
+  }
+};
+
 type ConditionBudget = { remainingConditions: number };
 
 // A reached object brings in the conditions of *every* role, not of the role
@@ -141,12 +266,14 @@ const walkObject = ({
   objectName,
   rules,
   objectPath,
+  cycleExemptObjectName,
   budget,
   describeRule,
 }: {
   objectName: string;
   rules: OnemaAccessRules;
   objectPath: string[];
+  cycleExemptObjectName?: string;
   budget: ConditionBudget;
   describeRule: string;
 }): void => {
@@ -161,7 +288,14 @@ const walkObject = ({
       continue;
     }
 
-    walkCondition({ condition, rules, objectPath, budget, describeRule });
+    walkCondition({
+      condition,
+      rules,
+      objectPath,
+      cycleExemptObjectName,
+      budget,
+      describeRule,
+    });
   }
 };
 
@@ -169,12 +303,14 @@ const walkCondition = ({
   condition,
   rules,
   objectPath,
+  cycleExemptObjectName,
   budget,
   describeRule,
 }: {
   condition: OnemaCondition;
   rules: OnemaAccessRules;
   objectPath: string[];
+  cycleExemptObjectName?: string;
   budget: ConditionBudget;
   describeRule: string;
 }): void => {
@@ -195,6 +331,7 @@ const walkCondition = ({
         condition: operand,
         rules,
         objectPath,
+        cycleExemptObjectName,
         budget,
         describeRule,
       });
@@ -211,6 +348,7 @@ const walkCondition = ({
     const nextObjectPath = enterObject({
       objectName: condition.exists.object,
       objectPath,
+      cycleExemptObjectName,
       describeRule,
     });
 
@@ -218,6 +356,7 @@ const walkCondition = ({
       objectName: condition.exists.object,
       rules,
       objectPath: nextObjectPath,
+      cycleExemptObjectName,
       budget,
       describeRule,
     });
@@ -227,6 +366,7 @@ const walkCondition = ({
         condition: condition.exists.where,
         rules,
         objectPath: nextObjectPath,
+        cycleExemptObjectName,
         budget,
         describeRule,
       });
@@ -239,6 +379,7 @@ const walkCondition = ({
     const nextObjectPath = enterObject({
       objectName: condition.parent.object,
       objectPath,
+      cycleExemptObjectName,
       describeRule,
     });
 
@@ -246,6 +387,7 @@ const walkCondition = ({
       objectName: condition.parent.object,
       rules,
       objectPath: nextObjectPath,
+      cycleExemptObjectName,
       budget,
       describeRule,
     });
@@ -255,13 +397,18 @@ const walkCondition = ({
 const enterObject = ({
   objectName,
   objectPath,
+  cycleExemptObjectName,
   describeRule,
 }: {
   objectName: string;
   objectPath: string[];
+  // See the compiler's state field of the same name: a write-parent walk starts
+  // at the row being written, so the parent's rule reaching that object again is
+  // other rows of it under their own rule, not a cycle
+  cycleExemptObjectName?: string;
   describeRule: string;
 }): string[] => {
-  if (objectPath.includes(objectName)) {
+  if (objectPath.includes(objectName) && objectName !== cycleExemptObjectName) {
     throw new OnemaAccessException(
       `Onema access rules form a cycle reachable from object ${describeRule}: ${[
         ...objectPath,

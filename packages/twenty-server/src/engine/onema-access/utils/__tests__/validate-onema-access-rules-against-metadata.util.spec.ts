@@ -7,9 +7,13 @@ import { validateOnemaAccessRulesAgainstMetadata } from 'src/engine/onema-access
 
 const SALES_ROLE_UNIVERSAL_IDENTIFIER = 'onema-sales';
 
+const workspaceMemberTableShape = buildTestTableShape({
+  nameSingular: 'workspaceMember',
+});
 const projectTableShape = buildTestTableShape({
   nameSingular: 'project',
   joinColumnNameByFieldName: { projectManager: 'projectManagerId' },
+  relationTargetByFieldName: { projectManager: 'workspaceMember' },
 });
 const projectMemberTableShape = buildTestTableShape({
   nameSingular: 'projectMember',
@@ -25,6 +29,7 @@ const { objectIdByNameSingular, tableShapeByObjectMetadataId } =
     projectTableShape,
     projectMemberTableShape,
     taskTableShape,
+    workspaceMemberTableShape,
   ]);
 
 const metadata = {
@@ -171,5 +176,109 @@ describe('validateOnemaAccessRulesAgainstMetadata', () => {
         metadata,
       }),
     ).toBe(first);
+  });
+
+  it('accepts protected fields and a freeze rule that exist', () => {
+    expect(
+      validate({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { task: { sales: { all: true } } },
+        writeProtectedFields: { task: { project: [] } },
+        freezeWhen: {
+          task: [{ field: 'id', equals: 'frozen', fields: ['project'] }],
+        },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  // A mistyped protected field protects nothing, and nothing else in the file
+  // says it was meant to be protected at all
+  it('rejects a protected field this workspace does not have', () => {
+    const validation = validate({
+      application: 'onema-application',
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { task: { sales: { all: true } } },
+      writeProtectedFields: { task: { onemaApprovalDecison: [] } },
+      freezeWhen: {},
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(/writeProtectedFields: "onemaApprovalDecison" is no field/);
+  });
+
+  it('accepts a write-parent link whose foreign key points at that object', () => {
+    expect(
+      validate({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { project: { sales: { all: true } } },
+        writeRequiresParentAccess: {
+          projectMember: [{ foreignKey: 'project', object: 'project' }],
+        },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  // A mistyped foreign key here leaves the access-granting link wide open
+  it('rejects a write-parent link whose foreign key points somewhere else', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+      writeRequiresParentAccess: {
+        projectMember: [{ foreignKey: 'member', object: 'project' }],
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(
+      /writeRequiresParentAccess: "member" of "projectMember" points at another object than "project"/,
+    );
+  });
+
+  it('accepts an owner default on a relation to workspaceMember', () => {
+    expect(
+      validate({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { project: { sales: { eq: ['projectManager', '$me'] } } },
+        ownerDefaults: { project: { sales: 'projectManager' } },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  // The substituted value is a workspaceMember id, so a default on a relation
+  // to anything else writes an id of the wrong object and the rule reading it
+  // then matches nothing at all
+  it('rejects an owner default on a relation that is not a workspaceMember', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { task: { sales: { eq: ['project', '$me'] } } },
+      ownerDefaults: { task: { sales: 'project' } },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(
+      /ownerDefaults: "project" of "task" points at another object than "workspaceMember"/,
+    );
+  });
+
+  it('rejects a freeze rule naming a field this workspace does not have', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { task: { sales: { all: true } } },
+      freezeWhen: {
+        task: [{ field: 'onemaStage', equals: 'DEAL', fields: ['project'] }],
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(/freezeWhen: "onemaStage" is no single-column field/);
   });
 });

@@ -27,4 +27,10 @@ export const ONEMA_MAX_RULE_DEPTH = 3;
 // too, and an unbounded one is a way to make the database do unbounded work
 export const ONEMA_MAX_CONDITIONS_PER_RULE = 32;
 
+// An update by filter can touch thousands of rows, and every one of their ids
+// becomes a bind parameter of the check after the write. Postgres stops at 65535
+// parameters per statement and plans an `IN` list of that size badly long before
+// then, so the ids go in batches of this size instead of one statement.
+export const ONEMA_RECORD_ID_BATCH_SIZE = 500;
+
 export const ONEMA_ACCESS_LOGGER_CONTEXT = 'OnemaAccess';
