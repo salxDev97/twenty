@@ -36,6 +36,7 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
   validateRoleKeysAreDeclared(rules);
   validateRequiredObjectsHaveRules(rules);
   validateObjectChains(rules);
+  validateWriteParentChains(rules);
   validateWriteProtectedFields(rules);
   validateFreezeRules(rules);
   validateOwnerDefaults(rules);
@@ -224,6 +225,35 @@ const validateObjectChains = (rules: OnemaAccessRules): void => {
   }
 };
 
+// Б5 links are compiled into the same joins as a rule and were walked by
+// nothing: a link too deep, or one that closes a cycle, turned into a silent
+// `denied` at compile time, and a silent `denied` on a write-parent check reads
+// as "this foreign key must stay empty" — the author is told their row may hang
+// on nothing at all. The walk makes it a refusal of the file instead.
+const validateWriteParentChains = (rules: OnemaAccessRules): void => {
+  for (const [objectName, parents] of Object.entries(
+    rules.writeRequiresParentAccess ?? {},
+  )) {
+    for (const parent of parents) {
+      const nextObjectPath = enterObject({
+        objectName: parent.object,
+        objectPath: [objectName],
+        cycleExemptObjectName: objectName,
+        describeRule: `"${objectName}" and its writeRequiresParentAccess link "${parent.foreignKey}"`,
+      });
+
+      walkObject({
+        objectName: parent.object,
+        rules,
+        objectPath: nextObjectPath,
+        cycleExemptObjectName: objectName,
+        budget: { remainingConditions: ONEMA_MAX_CONDITIONS_PER_RULE },
+        describeRule: `"${objectName}" and its writeRequiresParentAccess link "${parent.foreignKey}"`,
+      });
+    }
+  }
+};
+
 type ConditionBudget = { remainingConditions: number };
 
 // A reached object brings in the conditions of *every* role, not of the role
@@ -236,12 +266,14 @@ const walkObject = ({
   objectName,
   rules,
   objectPath,
+  cycleExemptObjectName,
   budget,
   describeRule,
 }: {
   objectName: string;
   rules: OnemaAccessRules;
   objectPath: string[];
+  cycleExemptObjectName?: string;
   budget: ConditionBudget;
   describeRule: string;
 }): void => {
@@ -256,7 +288,14 @@ const walkObject = ({
       continue;
     }
 
-    walkCondition({ condition, rules, objectPath, budget, describeRule });
+    walkCondition({
+      condition,
+      rules,
+      objectPath,
+      cycleExemptObjectName,
+      budget,
+      describeRule,
+    });
   }
 };
 
@@ -264,12 +303,14 @@ const walkCondition = ({
   condition,
   rules,
   objectPath,
+  cycleExemptObjectName,
   budget,
   describeRule,
 }: {
   condition: OnemaCondition;
   rules: OnemaAccessRules;
   objectPath: string[];
+  cycleExemptObjectName?: string;
   budget: ConditionBudget;
   describeRule: string;
 }): void => {
@@ -290,6 +331,7 @@ const walkCondition = ({
         condition: operand,
         rules,
         objectPath,
+        cycleExemptObjectName,
         budget,
         describeRule,
       });
@@ -306,6 +348,7 @@ const walkCondition = ({
     const nextObjectPath = enterObject({
       objectName: condition.exists.object,
       objectPath,
+      cycleExemptObjectName,
       describeRule,
     });
 
@@ -313,6 +356,7 @@ const walkCondition = ({
       objectName: condition.exists.object,
       rules,
       objectPath: nextObjectPath,
+      cycleExemptObjectName,
       budget,
       describeRule,
     });
@@ -322,6 +366,7 @@ const walkCondition = ({
         condition: condition.exists.where,
         rules,
         objectPath: nextObjectPath,
+        cycleExemptObjectName,
         budget,
         describeRule,
       });
@@ -334,6 +379,7 @@ const walkCondition = ({
     const nextObjectPath = enterObject({
       objectName: condition.parent.object,
       objectPath,
+      cycleExemptObjectName,
       describeRule,
     });
 
@@ -341,6 +387,7 @@ const walkCondition = ({
       objectName: condition.parent.object,
       rules,
       objectPath: nextObjectPath,
+      cycleExemptObjectName,
       budget,
       describeRule,
     });
@@ -350,13 +397,18 @@ const walkCondition = ({
 const enterObject = ({
   objectName,
   objectPath,
+  cycleExemptObjectName,
   describeRule,
 }: {
   objectName: string;
   objectPath: string[];
+  // See the compiler's state field of the same name: a write-parent walk starts
+  // at the row being written, so the parent's rule reaching that object again is
+  // other rows of it under their own rule, not a cycle
+  cycleExemptObjectName?: string;
   describeRule: string;
 }): string[] => {
-  if (objectPath.includes(objectName)) {
+  if (objectPath.includes(objectName) && objectName !== cycleExemptObjectName) {
     throw new OnemaAccessException(
       `Onema access rules form a cycle reachable from object ${describeRule}: ${[
         ...objectPath,

@@ -10,6 +10,7 @@ import {
 import {
   buildOnemaCompilationContext,
   compileOnemaRowAccess,
+  compileOnemaWriteParentAccess,
   resetOnemaParameterNamespaceForTesting,
 } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 
@@ -28,7 +29,10 @@ const opportunityTableShape = buildTestTableShape({
 });
 const projectTableShape = buildTestTableShape({
   nameSingular: 'project',
-  joinColumnNameByFieldName: { projectManager: 'projectManagerId' },
+  joinColumnNameByFieldName: {
+    projectManager: 'projectManagerId',
+    opportunity: 'opportunityId',
+  },
 });
 const projectMemberTableShape = buildTestTableShape({
   nameSingular: 'projectMember',
@@ -550,5 +554,136 @@ describe('compileOnemaRowAccess', () => {
         context,
       }),
     ).toThrow(OnemaAccessException);
+  });
+});
+
+describe('compileOnemaWriteParentAccess', () => {
+  beforeEach(() => resetOnemaParameterNamespaceForTesting());
+
+  const contractorSubject: OnemaAccessSubject = {
+    workspaceMemberId: WORKSPACE_MEMBER_ID,
+    roleUniversalIdentifiers: [CONTRACTOR_ROLE_UNIVERSAL_IDENTIFIER],
+  };
+
+  // The ONE-111 bug ONE-112 found. The chain starts at the `projectMember` row
+  // being written, not at a rule of `projectMember`, so `project`'s own rule
+  // coming back to `projectMember` reads *other* membership rows under their own
+  // rule. Refusing that as a cycle compiled to `denied`, which on the write side
+  // means "this foreign key must stay empty" — it silently took away the
+  // membership a contractor is entitled to create.
+  it('lets the parent rule reach the written object again', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          project: {
+            contractor: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: { eq: ['member', '$me'] },
+              },
+            },
+          },
+        },
+        writeRequiresParentAccess: {
+          projectMember: [{ foreignKey: 'project', object: 'project' }],
+        },
+      },
+      subject: contractorSubject,
+    });
+
+    const rowAccess = compileOnemaWriteParentAccess({
+      tableShape: projectMemberTableShape,
+      tableAlias: 'projectMember',
+      parents: [{ foreignKey: 'project', object: 'project' }],
+      context,
+    });
+
+    expect(rowAccess.kind).toBe('gated');
+
+    if (rowAccess.kind !== 'gated') {
+      return;
+    }
+
+    expect(rowAccess.condition.sql).toContain('"projectMember"."projectId"');
+    expect(rowAccess.condition.sql).toContain('"projectMember"');
+    expect(Object.values(rowAccess.condition.parameters)).toContain(
+      WORKSPACE_MEMBER_ID,
+    );
+  });
+
+  // The exemption covers the written object alone. Anything else coming round
+  // twice is the unbounded join the limit exists for, and the write-parent check
+  // reads the same `denied` as before.
+  it('still denies a parent chain that cycles among the parents', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          project: {
+            contractor: {
+              parent: { foreignKey: 'opportunity', object: 'opportunity' },
+            },
+          },
+          opportunity: {
+            contractor: {
+              exists: { object: 'project', backForeignKey: 'opportunity' },
+            },
+          },
+        },
+        writeRequiresParentAccess: {
+          projectMember: [{ foreignKey: 'project', object: 'project' }],
+        },
+      },
+      subject: contractorSubject,
+    });
+
+    expect(
+      compileOnemaWriteParentAccess({
+        tableShape: projectMemberTableShape,
+        tableAlias: 'projectMember',
+        parents: [{ foreignKey: 'project', object: 'project' }],
+        context,
+      }),
+    ).toEqual({
+      kind: 'gated',
+      condition: { sql: '"projectMember"."projectId" IS NULL', parameters: {} },
+    });
+  });
+
+  // A plain read keeps the old answer: nothing seeds an exemption there, so a
+  // rule that walks back to its own object is still the cycle it always was
+  it('keeps denying a cycle when the same rules are compiled for a read', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          projectMember: {
+            contractor: {
+              parent: { foreignKey: 'project', object: 'project' },
+            },
+          },
+          project: {
+            contractor: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: { eq: ['member', '$me'] },
+              },
+            },
+          },
+        },
+      },
+      subject: contractorSubject,
+    });
+
+    const rowAccess = compileOnemaRowAccess({
+      tableShape: projectMemberTableShape,
+      tableAlias: 'projectMember',
+      context,
+    });
+
+    expect(rowAccess.kind).toBe('denied');
   });
 });

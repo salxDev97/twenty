@@ -157,6 +157,91 @@ describe('parseOnemaAccessRules', () => {
     ).toThrow(/cycle/);
   });
 
+  // The bug ONE-112 found in this check. The write-parent chain starts at the
+  // row being written, not at a rule, so the parent's rule coming back to that
+  // object reads *other* rows of it under their own rule. Refusing it as a cycle
+  // took away the membership a contractor is entitled to create — `projectMember
+  // -> project -> projectMember` is how they see the project at all.
+  it('accepts a write-parent link whose parent rule leads back to the written object', () => {
+    const rules = {
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {
+        projectMember: [{ foreignKey: 'project', object: 'project' }],
+      },
+      freezeWhen: {},
+      objects: {
+        project: {
+          sales: {
+            exists: {
+              object: 'projectMember',
+              backForeignKey: 'project',
+              where: { eq: ['member', '$me'] },
+            },
+          },
+        },
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  // The exemption is for the object the chain was seeded with and nothing else:
+  // any other object coming round twice is still the unbounded join it was
+  it('rejects a write-parent link whose parent rules cycle among themselves', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {
+          dataRoomItem: [{ foreignKey: 'project', object: 'project' }],
+        },
+        freezeWhen: {},
+        objects: {
+          project: {
+            sales: { parent: { foreignKey: 'company', object: 'company' } },
+          },
+          company: {
+            sales: { parent: { foreignKey: 'project', object: 'project' } },
+          },
+        },
+      }),
+    ).toThrow(/cycle/);
+  });
+
+  // A link too deep used to become a silent `denied` at compile time, and a
+  // silent `denied` on the write side reads as "this foreign key must stay
+  // empty" — the author is told their row may hang on nothing at all
+  it('refuses the file when a write-parent link nests deeper than the limit', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {
+          dataRoomItem: [{ foreignKey: 'project', object: 'project' }],
+        },
+        freezeWhen: {},
+        objects: {
+          project: {
+            sales: { parent: { foreignKey: 'company', object: 'company' } },
+          },
+          company: {
+            sales: {
+              parent: { foreignKey: 'opportunity', object: 'opportunity' },
+            },
+          },
+          opportunity: {
+            sales: { parent: { foreignKey: 'lead', object: 'lead' } },
+          },
+          lead: { sales: { eq: ['owner', '$me'] } },
+        },
+      }),
+    ).toThrow(/nest deeper than/);
+  });
+
   // The compiler ORs the rules of every role its subject holds, so a chain that
   // no single role closes on its own still closes in the generated SQL
   it('rejects a cycle that only closes across two roles', () => {

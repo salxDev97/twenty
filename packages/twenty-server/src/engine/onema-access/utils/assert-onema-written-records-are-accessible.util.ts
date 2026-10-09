@@ -117,9 +117,7 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
   });
 
   const parents =
-    resolution.rules.writeRequiresParentAccess?.[
-      scope.tableShape.nameSingular
-    ];
+    resolution.rules.writeRequiresParentAccess?.[scope.tableShape.nameSingular];
 
   if (!isDefined(parents)) {
     return;

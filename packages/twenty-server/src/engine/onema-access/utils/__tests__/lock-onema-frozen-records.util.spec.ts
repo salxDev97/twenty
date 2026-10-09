@@ -20,9 +20,7 @@ const dealIsFinalRules: OnemaAccessRules = {
   roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
   objects: { opportunity: { sales: { all: true } } },
   freezeWhen: {
-    opportunity: [
-      { field: 'onemaStage', equals: 'DEAL', fields: ['company'] },
-    ],
+    opportunity: [{ field: 'onemaStage', equals: 'DEAL', fields: ['company'] }],
   },
 };
 

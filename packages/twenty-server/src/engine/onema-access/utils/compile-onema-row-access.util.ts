@@ -46,6 +46,14 @@ type CompilationState = {
   context: OnemaCompilationContext;
   namePrefix: string;
   nextIndex: number;
+  // A write-parent chain starts at the row being written, which is not a rule of
+  // anything: when the parent's own rule reaches that object again it reads
+  // *other* rows of it, under their own rule, and stops there. Treating that as
+  // a cycle dropped the one rule that mattered — `projectMember -> project ->
+  // projectMember` is how a contractor sees the project at all, so the check
+  // refused them the membership they were entitled to create. Depth still bounds
+  // the walk, so nothing here can run away.
+  cycleExemptObjectName?: string;
 };
 
 export const buildOnemaCompilationContext = ({
@@ -122,6 +130,7 @@ export const compileOnemaWriteParentAccess = ({
       tableAlias,
     )}_parent`,
     nextIndex: 0,
+    cycleExemptObjectName: tableShape.nameSingular,
   };
 
   return combineRowAccess(
@@ -326,7 +335,11 @@ const compileExists = ({
   const nextObjectPath = [...objectPath, targetTableShape.nameSingular];
 
   if (
-    objectPath.includes(targetTableShape.nameSingular) ||
+    closesACycle({
+      objectPath,
+      objectName: targetTableShape.nameSingular,
+      state,
+    }) ||
     nextObjectPath.length > ONEMA_MAX_RULE_DEPTH
   ) {
     return { kind: 'denied' };
@@ -425,7 +438,11 @@ const compileParent = ({
   const nextObjectPath = [...objectPath, parentTableShape.nameSingular];
 
   if (
-    objectPath.includes(parentTableShape.nameSingular) ||
+    closesACycle({
+      objectPath,
+      objectName: parentTableShape.nameSingular,
+      state,
+    }) ||
     nextObjectPath.length > ONEMA_MAX_RULE_DEPTH
   ) {
     return { kind: 'denied' };
@@ -576,6 +593,19 @@ const resolveColumnName = ({
     OnemaAccessExceptionCode.UNKNOWN_FIELD,
   );
 };
+
+// The exempt object is the one the chain was seeded with, and only a chain
+// seeded by a written row has one; every other revisit is still a cycle
+const closesACycle = ({
+  objectPath,
+  objectName,
+  state,
+}: {
+  objectPath: string[];
+  objectName: string;
+  state: CompilationState;
+}): boolean =>
+  objectPath.includes(objectName) && objectName !== state.cycleExemptObjectName;
 
 const quoteColumn = (alias: string, columnName: string): string =>
   `${escapeIdentifier(alias)}.${escapeIdentifier(columnName)}`;
