@@ -1,3 +1,4 @@
+import { Client } from 'pg';
 import { default as request } from 'supertest';
 import {
   createFixtureCompany,
@@ -15,12 +16,72 @@ import { mergeManyOperationFactory } from 'test/integration/graphql/utils/merge-
 import { restoreManyOperationFactory } from 'test/integration/graphql/utils/restore-many-operation-factory.util';
 import { updateManyOperationFactory } from 'test/integration/graphql/utils/update-many-operation-factory.util';
 import { updateOneOperationFactory } from 'test/integration/graphql/utils/update-one-operation-factory.util';
+import { getAppProviderByClassName } from 'test/integration/utils/get-app-provider-by-class-name.util';
 
+import { TwentyConfigService } from 'src/engine/core-modules/twenty-config/twenty-config.service';
 import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { setOnemaAccessRulesForTesting } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
+import { computeTableName } from 'src/engine/utils/compute-table-name.util';
+import { SEED_APPLE_WORKSPACE_ID } from 'src/engine/workspace-manager/dev-seeder/core/constants/seeder-workspaces.constant';
 import { WORKSPACE_MEMBER_DATA_SEED_IDS } from 'src/engine/workspace-manager/dev-seeder/data/constants/workspace-member-data-seeds.constant';
+import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
+import { escapeIdentifier } from 'src/engine/workspace-manager/workspace-migration/utils/remove-sql-injection.util';
 
 const client = request(`http://localhost:${APP_PORT}`);
+
+// `person` is a standard object, so its table carries no custom prefix
+const PERSON_TABLE = `${escapeIdentifier(
+  getWorkspaceSchemaName(SEED_APPLE_WORKSPACE_ID),
+)}.${escapeIdentifier(computeTableName('person', false))}`;
+
+type OnemaLockWaiter = { query: string; xact_start: Date; query_start: Date };
+
+// Supertest sends the request when it is ended, not when its result is awaited,
+// and this one has to be in flight while another transaction holds the row lock
+const startRequest = <TResponse>(
+  pendingRequest: PromiseLike<TResponse> & {
+    end: (callback: (error: Error | null, response: TResponse) => void) => void;
+  },
+): Promise<TResponse> =>
+  new Promise((resolve, reject) => {
+    pendingRequest.end((error, response) =>
+      error === null ? resolve(response) : reject(error),
+    );
+  });
+
+// The statement blocked on the row lock, read while it is blocked: it cannot
+// proceed until the lock holder commits, so there is no window to miss — only a
+// request that never took the lock would leave nothing to find
+const waitForLockWaiter = async (
+  lockHolder: Client,
+): Promise<OnemaLockWaiter> => {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    // The lock holder polls from inside its own transaction, and Postgres caches
+    // the activity snapshot for the whole of one — without this every read after
+    // the first answers with the state the database was in before the request
+    // under test had started
+    await lockHolder.query('SELECT pg_stat_clear_snapshot()');
+
+    const waiters = await lockHolder.query<OnemaLockWaiter>(
+      `SELECT "query", "xact_start", "query_start"
+         FROM "pg_stat_activity"
+        WHERE "pid" <> pg_backend_pid()
+          AND "datname" = current_database()
+          AND "state" = 'active'
+          AND "wait_event_type" = 'Lock'`,
+    );
+
+    if (waiters.rows.length === 1) {
+      return waiters.rows[0];
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(
+    'no statement of the application was waiting on the row lock: the freeze read its pre-image without taking one',
+  );
+};
 
 const CREATED_COMPANY_NAME = 'Onema write access (created)';
 const REFUSED_COMPANY_NAME = 'Onema write access (refused)';
@@ -690,36 +751,30 @@ describe('onemaWriteAccess', () => {
     expect(await readPersonCompanyId(ownedPersonId)).toBe(ownedCompanyId);
   });
 
-  // The race itself, with no freeze in place when it starts: "the lead becomes a
-  // DEAL" against "the lead changes company", issued together.
+  // В2 and §12а Т-2, the half of the question that is decidable without a race.
+  // The race itself — two writers arriving together, where what the scheduler
+  // does with them is part of the answer — is probabilistic and lives outside
+  // the mandatory run (test/integration/onema-race/).
   //
-  // Both racers write `jobTitle`, which is what makes the race observable at all.
-  // The latch says the stage is reached and never left, so in every legitimate
-  // serial order the row ends on DEAL. Without the lock a company racer that
-  // read "PROPOSAL" before the DEAL committed still writes afterwards, puts
-  // `jobTitle` back to PROPOSAL and leaves the row in a state no serial order
-  // could reach — which is exactly what this asserts against.
+  // This one is ordered throughout. A second connection takes the row's lock and,
+  // while holding it, moves the record into the frozen state. The request under
+  // test has by then already read its own snapshot of the record — "not frozen"
+  // — so it can only refuse if it reads the pre-image again under a lock it has
+  // to wait for. What it is waiting on is read out of `pg_stat_activity` while
+  // it waits: the blocked statement has to be a `SELECT … FOR UPDATE` on the
+  // person table rather than the UPDATE itself, in a transaction that opened
+  // before that statement — the writing transaction, which had already read the
+  // record. Then the lock is released, and the answer has to be a refusal with
+  // the row untouched.
   //
-  // Which side loses is up to the scheduler and is not asserted: a company
-  // change that commits before the DEAL is a legitimate order. What is asserted
-  // is that the outcome agrees with the answers the racers were given.
-  //
-  // Verified by taking the lock out: the row came back on PROPOSAL, which no
-  // serial order reaches. Being a real race it caught that in two runs out of
-  // three, which is why there are eight racers rather than one.
-  it('settles a freeze racing the write that creates it', async () => {
-    const latchedRules: OnemaAccessRules = {
+  // Without the lock the request decides on the snapshot it read first, finds no
+  // freeze, and writes: the company moves and nothing is blocked at all.
+  it('reads the pre-image of the freeze under a row lock in the writing transaction', async () => {
+    const freezeRules: OnemaAccessRules = {
       roles: { member: memberRoleUniversalIdentifier },
       objects: { person: { member: { all: true } } },
       freezeWhen: {
-        person: [
-          {
-            field: 'jobTitle',
-            equals: 'DEAL',
-            fields: ['company'],
-            isIrreversible: true,
-          },
-        ],
+        person: [{ field: 'jobTitle', equals: 'DEAL', fields: ['company'] }],
       },
     };
 
@@ -729,64 +784,62 @@ describe('onemaWriteAccess', () => {
         objectMetadataSingularName: 'person',
         gqlFields: 'id jobTitle company { id }',
         recordId: ownedPersonId,
-        data: { jobTitle: 'PROPOSAL', companyId: ownedCompanyId },
+        data: { jobTitle: 'NOT A DEAL', companyId: ownedCompanyId },
       }),
     );
 
-    setOnemaAccessRulesForTesting(latchedRules);
+    const blocker = new Client({
+      connectionString: getAppProviderByClassName<TwentyConfigService>(
+        'TwentyConfigService',
+      ).get('PG_DATABASE_URL'),
+    });
 
-    const [dealRacer, ...companyRacers] = await Promise.all([
-      makeRequestAsJony(
-        updateOneOperationFactory({
-          objectMetadataSingularName: 'person',
-          gqlFields: 'id jobTitle',
-          recordId: ownedPersonId,
-          data: { jobTitle: 'DEAL' },
-        }),
-      ),
-      // The shape a form submits: the company the user picked, and the stage
-      // the record showed when the form was opened
-      ...[0, 1, 2, 3, 4, 5, 6, 7].map(() =>
+    await blocker.connect();
+
+    try {
+      await blocker.query('BEGIN');
+
+      const frozenByTheOtherWriter = await blocker.query(
+        `UPDATE ${PERSON_TABLE} SET "jobTitle" = 'DEAL' WHERE "id" = $1`,
+        [ownedPersonId],
+      );
+
+      // A lock on no row would make everything below pass for the wrong reason
+      expect(frozenByTheOtherWriter.rowCount).toBe(1);
+
+      setOnemaAccessRulesForTesting(freezeRules);
+
+      const blockedMove = startRequest(
         makeRequestAsJony(
           updateOneOperationFactory({
             objectMetadataSingularName: 'person',
-            gqlFields: 'id jobTitle company { id }',
+            gqlFields: 'id company { id }',
             recordId: ownedPersonId,
-            data: { jobTitle: 'PROPOSAL', companyId: secondOwnedCompanyId },
+            data: { companyId: secondOwnedCompanyId },
           }),
         ),
-      ),
-    ]);
+      );
 
-    // Nothing freezes the move *into* the stage, so this one always holds
-    expect(dealRacer.body.errors).toBeUndefined();
+      const lockWaiter = await waitForLockWaiter(blocker);
 
-    for (const companyRacer of companyRacers) {
-      if (companyRacer.body.errors !== undefined) {
-        expectForbidden(companyRacer);
-      }
+      expect(lockWaiter.query).toMatch(/FOR\s+(?:NO\s+KEY\s+)?UPDATE/i);
+      expect(lockWaiter.query).toContain('person');
+
+      // A statement of its own would have opened its transaction at its own
+      // start; this one belongs to a transaction that was already reading the
+      // record before it
+      expect(new Date(lockWaiter.xact_start).getTime()).toBeLessThan(
+        new Date(lockWaiter.query_start).getTime(),
+      );
+
+      await blocker.query('COMMIT');
+
+      expectForbidden(await blockedMove);
+      expect(await readPersonCompanyId(ownedPersonId)).toBe(ownedCompanyId);
+    } finally {
+      await blocker.query('ROLLBACK').catch(() => undefined);
+      await blocker.end();
     }
-
-    const settled = (
-      await readBehindTheRules<SeedPerson>({
-        objectMetadataSingularName: 'person',
-        objectMetadataPluralName: 'people',
-        gqlFields: 'id jobTitle company { id }',
-        filter: { id: { eq: ownedPersonId } },
-      })
-    )[0];
-
-    expect(settled.jobTitle).toBe('DEAL');
-
-    // A racer that was told its write went through has to be the state the row
-    // is in; one that was refused must have changed nothing
-    const hasCommittedCompanyChange = companyRacers.some(
-      (companyRacer) => companyRacer.body.errors === undefined,
-    );
-
-    expect(settled.company?.id).toBe(
-      hasCommittedCompanyChange ? secondOwnedCompanyId : ownedCompanyId,
-    );
   });
 
   // The review's open question on Т-2: a soft delete and a restore write
