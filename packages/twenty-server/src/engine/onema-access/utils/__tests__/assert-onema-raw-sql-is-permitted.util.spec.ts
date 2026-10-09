@@ -144,6 +144,125 @@ describe('assertOnemaRawSqlIsPermitted', () => {
     ).toThrow(/would write outside every hook/);
   });
 
+  // The hole the review named. The check used to ask which object the
+  // repository was built for, which is a different question from which table
+  // the statement writes: campaign delivery is governed by no rule of ours, and
+  // its repository could write the opportunity table through this door.
+  it('refuses a governed table written through an ungoverned repository', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'UPDATE "workspace_test"."_opportunity" SET "onemaStage" = :p0',
+        tableShape: campaignDeliveryTableShape,
+      }),
+    ).toThrow(/"_opportunity" would write outside every hook/);
+  });
+
+  it('leaves an ungoverned table written through a governed repository alone', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'UPDATE "workspace_test"."_campaignDelivery" SET "state" = :p0',
+      }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ['UPDATE "workspace_test"."_opportunity" SET "name" = :p0 FROM "x"'],
+    ['UPDATE ONLY "workspace_test"."_opportunity" SET "name" = :p0'],
+    ['MERGE INTO "workspace_test"."_opportunity" AS o USING "x" ON true'],
+    [`COPY "workspace_test"."_opportunity" ("id") FROM STDIN`],
+    ['DELETE FROM ONLY "workspace_test"."_opportunity" WHERE true'],
+    [
+      'TRUNCATE TABLE "workspace_test"."_campaignDelivery", "workspace_test"."_opportunity"',
+    ],
+  ])('reads the target table out of %s', (sql) => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() => assertPermitted({ sql })).toThrow(
+      /would write outside every hook/,
+    );
+  });
+
+  // The statement leaves the schema to the search path, so the table name alone
+  // decides — which is the closed side of the question
+  it('refuses a governed table named without its schema', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({ sql: 'DELETE FROM "_opportunity" WHERE true' }),
+    ).toThrow(/would write outside every hook/);
+  });
+
+  // `COPY … TO` reads, and reading is ONE-113's question, not this one
+  it('lets a COPY that only reads through', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'COPY (SELECT "id" FROM "workspace_test"."_opportunity") TO STDOUT',
+      }),
+    ).not.toThrow();
+  });
+
+  // The body used to be cut out as a literal before the keywords were read,
+  // which is exactly how a write hid from this check
+  it('refuses a DO block that writes a governed table', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'DO $$ BEGIN UPDATE "workspace_test"."_opportunity" SET "onemaStage" = 1; END $$',
+      }),
+    ).toThrow(/a dollar-quoted body/);
+  });
+
+  // Whatever it writes, it writes somewhere this check cannot look, so there is
+  // no reading of it that is safe
+  it.each([
+    ['DO $block$ BEGIN PERFORM 1; END $block$', /a dollar-quoted body/],
+    ['CALL onema_settle_batch(:p0)', /a CALL/],
+    ['EXECUTE settle_batch (:p0)', /an EXECUTE/],
+  ])('refuses %s whatever table it names', (sql, reason) => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() => assertPermitted({ sql })).toThrow(reason);
+  });
+
+  // `ON CONFLICT DO NOTHING` is the insert path's own clause, not a DO block,
+  // and the row it may touch is the one the INSERT already names
+  it('does not read an ON CONFLICT clause as a block', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'INSERT INTO "workspace_test"."_campaignDelivery" ("id") VALUES (:p0) ON CONFLICT ("id") DO NOTHING',
+      }),
+    ).not.toThrow();
+  });
+
+  it('refuses an ON CONFLICT DO UPDATE on a governed table by its INSERT target', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() =>
+      assertPermitted({
+        sql: 'INSERT INTO "workspace_test"."_opportunity" ("id") VALUES (:p0) ON CONFLICT ("id") DO UPDATE SET "name" = :p1',
+      }),
+    ).toThrow(/"_opportunity" would write outside every hook/);
+  });
+
+  // A write this parser cannot attribute is refused rather than guessed at:
+  // "probably nothing governed" is not an answer a closed-by-default check gives
+  it('refuses a write whose target table it cannot read', () => {
+    setOnemaAccessRulesForTesting(governedRules);
+
+    expect(() => assertPermitted({ sql: 'UPDATE (:p0) SET "x" = 1' })).toThrow(
+      /target table could not be read/,
+    );
+  });
+
   // A keyword inside a literal or a comment is text, not a statement
   it('reads past a keyword that is only text', () => {
     setOnemaAccessRulesForTesting(governedRules);
