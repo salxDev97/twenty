@@ -18,12 +18,6 @@ export type OnemaSqlWriteTargets =
   | { kind: 'unreadable'; keyword: string }
   | { kind: 'tables'; keyword: string; tables: OnemaSqlTableReference[] };
 
-const COMMENTS = /--[^\n]*|\/\*[\s\S]*?\*\//g;
-
-// A keyword inside a string literal is text, not a statement, and a note
-// mentioning "delete" must not close the query
-const SINGLE_QUOTED_LITERAL = /'(?:[^']|'')*'/g;
-
 // `SELECT … FOR UPDATE` and `FOR SHARE` take a lock; they write nothing. The
 // freeze of rls-design §12а reads the row it compares exactly that way.
 const LOCK_CLAUSE =
@@ -33,10 +27,6 @@ const LOCK_CLAUSE =
 // loses no target — and leaving it in would read "UPDATE SET" as a table name
 const ON_CONFLICT_ACTION =
   /\bON\s+CONFLICT\b[\s\S]*?\bDO\s+(?:NOTHING|UPDATE)\b/gi;
-
-// Dollar quoting is a body this check cannot read. `DO $$ BEGIN UPDATE … END $$`
-// used to be cut out as a literal, which is precisely how a write hid from it.
-const DOLLAR_QUOTED_BODY = /\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
 
 // `DO` outside the two `ON CONFLICT` actions is a procedural block
 const PROCEDURAL_BLOCK = /\bDO\b/i;
@@ -99,15 +89,13 @@ const TARGET_PATTERN_BY_KEYWORD: { keyword: string; pattern: RegExp }[] = [
 export const collectOnemaSqlWriteTargets = (
   sql: string,
 ): OnemaSqlWriteTargets => {
-  const withoutLiterals = sql
-    .replace(COMMENTS, ' ')
-    .replace(SINGLE_QUOTED_LITERAL, ' ');
+  const masked = maskLiteralsAndComments(sql);
 
-  if (DOLLAR_QUOTED_BODY.test(withoutLiterals)) {
-    return { kind: 'opaque', construct: 'a dollar-quoted body' };
+  if (masked.kind === 'opaque') {
+    return masked;
   }
 
-  const statement = withoutLiterals
+  const statement = masked.statement
     .replace(LOCK_CLAUSE, ' ')
     .replace(ON_CONFLICT_ACTION, ' ');
 
@@ -153,6 +141,188 @@ export const collectOnemaSqlWriteTargets = (
   }
 
   return { kind: 'none' };
+};
+
+type MaskedStatement =
+  | { kind: 'masked'; statement: string }
+  | { kind: 'opaque'; construct: string };
+
+const IDENTIFIER_CHARACTER = /[A-Za-z0-9_$]/;
+
+// Dollar quoting opens a body this check cannot read, and `$1` is a parameter
+// rather than an opening: the closing `$` is what tells the two apart
+const DOLLAR_QUOTE_OPENING = /\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/y;
+
+// Comments and string literals each hide the other's opening, so neither may be
+// cut out before the other. Removing comments first read
+// `SELECT '/*'; UPDATE …; SELECT '*/'` as one harmless SELECT, because the
+// `/*` inside the first literal was taken for the start of a comment that ran
+// across the UPDATE. The statement is walked once instead: whichever construct
+// opens first is the one that closes, exactly as Postgres reads it.
+//
+// Quoted identifiers are kept as written — they are the table names the patterns
+// below have to read — while literals and comments become a space.
+const maskLiteralsAndComments = (sql: string): MaskedStatement => {
+  let statement = '';
+  let index = 0;
+
+  while (index < sql.length) {
+    const character = sql[index];
+
+    if (character === '-' && sql[index + 1] === '-') {
+      const lineEnd = sql.indexOf('\n', index);
+
+      index = lineEnd === -1 ? sql.length : lineEnd;
+      statement += ' ';
+      continue;
+    }
+
+    if (character === '/' && sql[index + 1] === '*') {
+      const commentEnd = skipBlockComment(sql, index);
+
+      if (commentEnd === undefined) {
+        return { kind: 'opaque', construct: 'an unterminated block comment' };
+      }
+
+      index = commentEnd;
+      statement += ' ';
+      continue;
+    }
+
+    if (character === "'") {
+      const literalEnd = skipSingleQuoted(sql, index);
+
+      if (literalEnd === undefined) {
+        return { kind: 'opaque', construct: 'an unterminated string literal' };
+      }
+
+      index = literalEnd;
+      statement += ' ';
+      continue;
+    }
+
+    if (character === '"') {
+      const identifierEnd = skipDoubleQuoted(sql, index);
+
+      if (identifierEnd === undefined) {
+        return {
+          kind: 'opaque',
+          construct: 'an unterminated quoted identifier',
+        };
+      }
+
+      statement += sql.slice(index, identifierEnd);
+      index = identifierEnd;
+      continue;
+    }
+
+    if (character === '$') {
+      DOLLAR_QUOTE_OPENING.lastIndex = index;
+
+      if (DOLLAR_QUOTE_OPENING.test(sql)) {
+        return { kind: 'opaque', construct: 'a dollar-quoted body' };
+      }
+    }
+
+    statement += character;
+    index += 1;
+  }
+
+  return { kind: 'masked', statement };
+};
+
+// Postgres nests block comments, so the first `*/` of
+// `/* /* UPDATE … */ */` closes the inner one and the statement continues
+const skipBlockComment = (
+  sql: string,
+  openIndex: number,
+): number | undefined => {
+  let depth = 0;
+  let index = openIndex;
+
+  while (index < sql.length - 1) {
+    if (sql[index] === '/' && sql[index + 1] === '*') {
+      depth += 1;
+      index += 2;
+      continue;
+    }
+
+    if (sql[index] === '*' && sql[index + 1] === '/') {
+      depth -= 1;
+      index += 2;
+
+      if (depth === 0) {
+        return index;
+      }
+
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return undefined;
+};
+
+const skipSingleQuoted = (
+  sql: string,
+  openIndex: number,
+): number | undefined => {
+  const allowsBackslashEscape = isEscapeStringLiteralAt(sql, openIndex);
+  let index = openIndex + 1;
+
+  while (index < sql.length) {
+    const character = sql[index];
+
+    if (allowsBackslashEscape && character === '\\') {
+      index += 2;
+      continue;
+    }
+
+    if (character === "'") {
+      // A doubled quote is one quote of the literal, not its end
+      if (sql[index + 1] === "'") {
+        index += 2;
+        continue;
+      }
+
+      return index + 1;
+    }
+
+    index += 1;
+  }
+
+  return undefined;
+};
+
+// `E'…'` is the one string form where a backslash escapes the quote that would
+// otherwise close the literal; everywhere else a backslash is an ordinary
+// character and reading it as an escape would run the literal past its end
+const isEscapeStringLiteralAt = (sql: string, quoteIndex: number): boolean =>
+  quoteIndex > 0 &&
+  (sql[quoteIndex - 1] === 'E' || sql[quoteIndex - 1] === 'e') &&
+  (quoteIndex === 1 || !IDENTIFIER_CHARACTER.test(sql[quoteIndex - 2]));
+
+const skipDoubleQuoted = (
+  sql: string,
+  openIndex: number,
+): number | undefined => {
+  let index = openIndex + 1;
+
+  while (index < sql.length) {
+    if (sql[index] === '"') {
+      if (sql[index + 1] === '"') {
+        index += 2;
+        continue;
+      }
+
+      return index + 1;
+    }
+
+    index += 1;
+  }
+
+  return undefined;
 };
 
 // Postgres folds an unquoted identifier to lower case and keeps a quoted one as

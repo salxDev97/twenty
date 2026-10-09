@@ -136,6 +136,83 @@ describe('collectOnemaSqlWriteTargets', () => {
     });
   });
 
+  // The review's own case: cutting comments out before literals turned the
+  // `/*` of the first literal into the opening of a comment that swallowed the
+  // UPDATE, and the whole thing read as a harmless SELECT
+  it('reads the write between two literals that look like a comment', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        `SELECT '/*'; UPDATE "workspace_x"."_task" SET "title" = :p0; SELECT '*/'`,
+      ),
+    ).toEqual({
+      kind: 'tables',
+      keyword: 'UPDATE',
+      tables: [{ schemaName: 'workspace_x', tableName: '_task' }],
+    });
+  });
+
+  // The other direction: a literal opening inside a comment is text of the
+  // comment, and must not swallow the statement that follows
+  it('reads the write after a comment holding an unbalanced quote', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        `-- it's a note about delete\nUPDATE "workspace_x"."_task" SET "title" = :p0`,
+      ),
+    ).toEqual({
+      kind: 'tables',
+      keyword: 'UPDATE',
+      tables: [{ schemaName: 'workspace_x', tableName: '_task' }],
+    });
+  });
+
+  it('reads the write after a block comment that nests another one', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        '/* outer /* inner */ still the outer */ DELETE FROM "workspace_x"."_task"',
+      ),
+    ).toEqual({
+      kind: 'tables',
+      keyword: 'DELETE',
+      tables: [{ schemaName: 'workspace_x', tableName: '_task' }],
+    });
+  });
+
+  // A doubled quote is one quote of the literal; reading it as its end used to
+  // leave the rest of the literal standing as if it were statement text
+  it.each([
+    [`SELECT 'it''s; UPDATE "workspace_x"."_task" SET x = 1; --'`],
+    [`SELECT E'\\'; UPDATE "workspace_x"."_task" SET x = 1; --'`],
+  ])('reads no write out of %s', (sql) => {
+    expect(collectOnemaSqlWriteTargets(sql)).toEqual({ kind: 'none' });
+  });
+
+  // A dollar quote inside a literal opens nothing, and the statement around it
+  // still has to be read
+  it('does not take a dollar quote inside a literal for a body', () => {
+    expect(
+      collectOnemaSqlWriteTargets(
+        `UPDATE "workspace_x"."_task" SET "title" = '$$ BEGIN END $$'`,
+      ),
+    ).toEqual({
+      kind: 'tables',
+      keyword: 'UPDATE',
+      tables: [{ schemaName: 'workspace_x', tableName: '_task' }],
+    });
+  });
+
+  // Nothing here can say where an unclosed construct would have ended, so the
+  // statement is refused rather than read as far as it happens to parse
+  it.each([
+    [`SELECT 'unterminated`, 'an unterminated string literal'],
+    ['SELECT /* unterminated', 'an unterminated block comment'],
+    ['SELECT "unterminated', 'an unterminated quoted identifier'],
+  ])('reads %s as opaque', (sql, construct) => {
+    expect(collectOnemaSqlWriteTargets(sql)).toEqual({
+      kind: 'opaque',
+      construct,
+    });
+  });
+
   // Postgres folds an unquoted identifier and keeps a quoted one as written, so
   // the two spellings are normalized apart rather than being treated as one
   it('keeps the case of a quoted name and folds an unquoted one', () => {
