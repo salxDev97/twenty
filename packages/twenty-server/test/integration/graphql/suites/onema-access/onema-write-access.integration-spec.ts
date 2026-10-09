@@ -234,7 +234,20 @@ describe('onemaWriteAccess', () => {
     });
   });
 
-  afterEach(() => setOnemaAccessRulesForTesting(undefined));
+  // The shared person is moved and renamed by most tests here, and a test that
+  // fails before its own cleanup would otherwise take every later one with it
+  afterEach(async () => {
+    setOnemaAccessRulesForTesting(undefined);
+
+    await makeRequestAsAdmin(
+      updateOneOperationFactory({
+        objectMetadataSingularName: 'person',
+        gqlFields: 'id jobTitle company { id }',
+        recordId: ownedPersonId,
+        data: { jobTitle: OWNED_PERSON_JOB_TITLE, companyId: ownedCompanyId },
+      }),
+    );
+  });
 
   // rls-design §11, "S1 создаёт лид, owner недоступен на запись": without the
   // pre-hook the record would be born unowned, and the check after the write
@@ -620,6 +633,62 @@ describe('onemaWriteAccess', () => {
     );
   });
 
+  // В2, and the limit of what an end-to-end test can say about it. The row lock
+  // exists so that a transaction cannot decide on a pre-image another
+  // transaction has already replaced. Its effect is not visible from outside:
+  // "the record reached DEAL and then the company changed" and "the company
+  // changed and then the record reached DEAL" leave exactly the same row, and
+  // the second is a legitimate serial order. That the comparison reads the row
+  // under `SELECT … FOR UPDATE` is pinned by the unit test on the lock itself.
+  //
+  // What this does assert is the part a race could still break in the open: a
+  // freeze that already holds is never slipped past by writers arriving at once.
+  it('refuses every one of several writers racing a freeze that already holds', async () => {
+    const freezeRules: OnemaAccessRules = {
+      roles: { member: memberRoleUniversalIdentifier },
+      objects: { person: { member: { all: true } } },
+      freezeWhen: {
+        person: [{ field: 'jobTitle', equals: 'DEAL', fields: ['company'] }],
+      },
+    };
+
+    setOnemaAccessRulesForTesting(undefined);
+    await makeRequestAsAdmin(
+      updateOneOperationFactory({
+        objectMetadataSingularName: 'person',
+        gqlFields: 'id jobTitle company { id }',
+        recordId: ownedPersonId,
+        data: { jobTitle: 'DEAL', companyId: ownedCompanyId },
+      }),
+    );
+
+    setOnemaAccessRulesForTesting(freezeRules);
+
+    const racers = await Promise.all(
+      [
+        secondOwnedCompanyId,
+        foreignCompanyId,
+        secondOwnedCompanyId,
+        foreignCompanyId,
+      ].map((companyId) =>
+        makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id company { id }',
+            recordId: ownedPersonId,
+            data: { companyId },
+          }),
+        ),
+      ),
+    );
+
+    for (const racer of racers) {
+      expectForbidden(racer);
+    }
+
+    expect(await readPersonCompanyId(ownedPersonId)).toBe(ownedCompanyId);
+  });
+
   // Б5, rls-design §5. The record is visible to whoever just wrote it — that is
   // what makes the check after the write say yes — and the question nothing was
   // asking is whose record it attached itself to.
@@ -767,6 +836,15 @@ describe('onemaWriteAccess', () => {
 
     afterEach(async () => {
       setOnemaAccessRulesForTesting(undefined);
+
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: secondOwnedPersonId,
+          data: { companyId: ownedCompanyId },
+        }),
+      );
 
       const leftovers = await readBehindTheRules<SeedPerson>({
         objectMetadataSingularName: 'person',
