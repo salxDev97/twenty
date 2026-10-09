@@ -27,6 +27,7 @@ import {
 } from 'src/engine/metadata-modules/permissions/permissions.exception';
 import { applyOnemaOwnerDefaults } from 'src/engine/onema-access/utils/apply-onema-owner-defaults.util';
 import { applyOnemaRowAccess } from 'src/engine/onema-access/utils/apply-onema-row-access.util';
+import { assertOnemaRawSqlIsPermitted } from 'src/engine/onema-access/utils/assert-onema-raw-sql-is-permitted.util';
 import { assertOnemaFrozenFieldsAreUnchanged } from 'src/engine/onema-access/utils/assert-onema-frozen-fields-are-unchanged.util';
 import { assertOnemaProtectedFieldsAreWritable } from 'src/engine/onema-access/utils/assert-onema-protected-fields-are-writable.util';
 import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
@@ -193,6 +194,23 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
   }
 
   async executeRaw<T extends Record<string, unknown>>(
+    sql: string,
+    parameters: Record<string, unknown>,
+  ): Promise<T[]> {
+    // Onema fork (ADR-003), rls-design §4: raw SQL passes none of the hooks the
+    // write paths below carry, so on an object the rules govern it may read and
+    // may lock, never write
+    assertOnemaRawSqlIsPermitted({ scope: this.onemaAccessScope, sql });
+
+    return this.executeRawWrite<T>(sql, parameters);
+  }
+
+  // The one audited way to write through raw SQL, and the repository's own
+  // INSERT is its only caller: by the time it runs, the owner default, the
+  // protected fields, the freeze under a row lock and the transaction the check
+  // after the write rolls back are all already in place. A CI check keeps the
+  // caller list to one (onema-raw-write-guard.spec.ts).
+  private async executeRawWrite<T extends Record<string, unknown>>(
     sql: string,
     parameters: Record<string, unknown>,
   ): Promise<T[]> {
@@ -1141,7 +1159,7 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       onConflictDoNothing,
     });
 
-    const rawRows = await this.executeRaw<ObjectRecord>(sql, parameters);
+    const rawRows = await this.executeRawWrite<ObjectRecord>(sql, parameters);
 
     await validateWrittenRecords?.(rawRows);
 

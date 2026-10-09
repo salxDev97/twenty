@@ -6,6 +6,7 @@ export const OnemaAccessExceptionCode = {
   INVALID_RULES: 'INVALID_RULES',
   UNKNOWN_OBJECT: 'UNKNOWN_OBJECT',
   UNKNOWN_FIELD: 'UNKNOWN_FIELD',
+  RAW_WRITE_REFUSED: 'RAW_WRITE_REFUSED',
 } as const;
 
 export type OnemaAccessExceptionCode =
