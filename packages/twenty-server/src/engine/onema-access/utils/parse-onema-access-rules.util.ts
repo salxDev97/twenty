@@ -3,6 +3,7 @@ import { isDefined } from 'twenty-shared/utils';
 import {
   ONEMA_MAX_CONDITIONS_PER_RULE,
   ONEMA_MAX_RULE_DEPTH,
+  ONEMA_MAX_RULE_DEPTH_THROUGH_POLYMORPHIC_TARGET,
 } from 'src/engine/onema-access/constants/onema-access.constants';
 import {
   OnemaAccessException,
@@ -12,6 +13,7 @@ import {
   type OnemaAccessRules,
   type OnemaCondition,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
+import { closesOnemaRuleCycle } from 'src/engine/onema-access/utils/closes-onema-rule-cycle.util';
 import { onemaAccessRulesSchema } from 'src/engine/onema-access/utils/onema-access-rules.schema';
 
 const CURRENT_MEMBER_TOKEN = '$me';
@@ -35,6 +37,7 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
   validateRoleIdentifiersAreUnique(rules);
   validateRoleKeysAreDeclared(rules);
   validateRequiredObjectsHaveRules(rules);
+  validatePolymorphicTargetsHaveRules(rules);
   validateObjectChains(rules);
   validateWriteParentChains(rules);
   validateWriteProtectedFields(rules);
@@ -159,6 +162,55 @@ const validateRequiredObjectsHaveRules = (rules: OnemaAccessRules): void => {
   }
 };
 
+// A plain `parent` to an object the rules never name adds no restriction and
+// that is on purpose (README, "Умолчания"). Inside `anyParent` and `linked` the
+// same silence is a hole: the branches are alternatives joined by OR, so one
+// target without a rule of its own makes every record that happens to hang off
+// that target visible to everyone the object permission admits. Naming a target
+// is therefore a promise that the target itself is ruled.
+const validatePolymorphicTargetsHaveRules = (rules: OnemaAccessRules): void => {
+  for (const [objectName, conditionByRoleKey] of Object.entries(
+    rules.objects,
+  )) {
+    for (const [roleKey, condition] of Object.entries(conditionByRoleKey)) {
+      if (!isDefined(condition)) {
+        continue;
+      }
+
+      for (const targetObjectName of collectPolymorphicTargets(condition)) {
+        if (!isDefined(rules.objects[targetObjectName])) {
+          throw new OnemaAccessException(
+            `Onema access rules reach "${targetObjectName}" through a polymorphic target of "${objectName}" and role "${roleKey}", but declare no rule for it: every record pointing there would be open`,
+            OnemaAccessExceptionCode.INVALID_RULES,
+          );
+        }
+      }
+    }
+  }
+};
+
+const collectPolymorphicTargets = (condition: OnemaCondition): string[] => {
+  if ('and' in condition || 'or' in condition) {
+    return ('and' in condition ? condition.and : condition.or).flatMap(
+      collectPolymorphicTargets,
+    );
+  }
+
+  if ('anyParent' in condition) {
+    return condition.anyParent.parents.map((parent) => parent.object);
+  }
+
+  if ('linked' in condition) {
+    return condition.linked.objects;
+  }
+
+  if ('exists' in condition && isDefined(condition.exists.where)) {
+    return collectPolymorphicTargets(condition.exists.where);
+  }
+
+  return [];
+};
+
 // Two role keys pointing at one role would hand the holder the union of both
 // sets of conditions — the widest wins, which is the opposite of closed by
 // default (a single `{ all: true }` would open everything for the other key)
@@ -217,7 +269,10 @@ const validateObjectChains = (rules: OnemaAccessRules): void => {
       walkCondition({
         condition,
         rules,
-        objectPath: [objectName],
+        chain: {
+          objectPath: [objectName],
+          maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
+        },
         budget: { remainingConditions: ONEMA_MAX_CONDITIONS_PER_RULE },
         describeRule: `"${objectName}" and role "${roleKey}"`,
       });
@@ -235,18 +290,14 @@ const validateWriteParentChains = (rules: OnemaAccessRules): void => {
     rules.writeRequiresParentAccess ?? {},
   )) {
     for (const parent of parents) {
-      const nextObjectPath = enterObject({
-        objectName: parent.object,
-        objectPath: [objectName],
-        cycleExemptObjectName: objectName,
-        describeRule: `"${objectName}" and its writeRequiresParentAccess link "${parent.foreignKey}"`,
-      });
-
-      walkObject({
+      walkTarget({
         objectName: parent.object,
         rules,
-        objectPath: nextObjectPath,
-        cycleExemptObjectName: objectName,
+        chain: {
+          objectPath: [objectName],
+          maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
+          cycleExemptObjectName: objectName,
+        },
         budget: { remainingConditions: ONEMA_MAX_CONDITIONS_PER_RULE },
         describeRule: `"${objectName}" and its writeRequiresParentAccess link "${parent.foreignKey}"`,
       });
@@ -255,6 +306,18 @@ const validateWriteParentChains = (rules: OnemaAccessRules): void => {
 };
 
 type ConditionBudget = { remainingConditions: number };
+
+// Mirrors the compiler's chain (compile-onema-row-access.util.ts): the same
+// path and the same budget, so a rule the loader accepts is a rule the compiler
+// can actually build instead of silently turning into "no rows"
+type ObjectChain = {
+  objectPath: string[];
+  maxObjectDepth: number;
+  // See the compiler's state field of the same name: a write-parent walk starts
+  // at the row being written, so the parent's rule reaching that object again is
+  // other rows of it under their own rule, not a cycle
+  cycleExemptObjectName?: string;
+};
 
 // A reached object brings in the conditions of *every* role, not of the role
 // the walk started from: the compiler ORs the rules of all the roles its
@@ -265,15 +328,13 @@ type ConditionBudget = { remainingConditions: number };
 const walkObject = ({
   objectName,
   rules,
-  objectPath,
-  cycleExemptObjectName,
+  chain,
   budget,
   describeRule,
 }: {
   objectName: string;
   rules: OnemaAccessRules;
-  objectPath: string[];
-  cycleExemptObjectName?: string;
+  chain: ObjectChain;
   budget: ConditionBudget;
   describeRule: string;
 }): void => {
@@ -288,29 +349,20 @@ const walkObject = ({
       continue;
     }
 
-    walkCondition({
-      condition,
-      rules,
-      objectPath,
-      cycleExemptObjectName,
-      budget,
-      describeRule,
-    });
+    walkCondition({ condition, rules, chain, budget, describeRule });
   }
 };
 
 const walkCondition = ({
   condition,
   rules,
-  objectPath,
-  cycleExemptObjectName,
+  chain,
   budget,
   describeRule,
 }: {
   condition: OnemaCondition;
   rules: OnemaAccessRules;
-  objectPath: string[];
-  cycleExemptObjectName?: string;
+  chain: ObjectChain;
   budget: ConditionBudget;
   describeRule: string;
 }): void => {
@@ -330,8 +382,7 @@ const walkCondition = ({
       walkCondition({
         condition: operand,
         rules,
-        objectPath,
-        cycleExemptObjectName,
+        chain,
         budget,
         describeRule,
       });
@@ -345,18 +396,16 @@ const walkCondition = ({
   // has to answer to the same depth and cycle limits — and, since the compiler
   // makes the witness row obey its own object's rule, to that rule too
   if ('exists' in condition) {
-    const nextObjectPath = enterObject({
+    const nextChain = enterObject({
       objectName: condition.exists.object,
-      objectPath,
-      cycleExemptObjectName,
+      chain,
       describeRule,
     });
 
     walkObject({
       objectName: condition.exists.object,
       rules,
-      objectPath: nextObjectPath,
-      cycleExemptObjectName,
+      chain: nextChain,
       budget,
       describeRule,
     });
@@ -365,8 +414,7 @@ const walkCondition = ({
       walkCondition({
         condition: condition.exists.where,
         rules,
-        objectPath: nextObjectPath,
-        cycleExemptObjectName,
+        chain: nextChain,
         budget,
         describeRule,
       });
@@ -376,58 +424,108 @@ const walkCondition = ({
   }
 
   if ('parent' in condition) {
-    const nextObjectPath = enterObject({
-      objectName: condition.parent.object,
-      objectPath,
-      cycleExemptObjectName,
-      describeRule,
-    });
-
-    walkObject({
+    walkTarget({
       objectName: condition.parent.object,
       rules,
-      objectPath: nextObjectPath,
-      cycleExemptObjectName,
+      chain,
       budget,
       describeRule,
     });
+
+    return;
+  }
+
+  if ('anyParent' in condition) {
+    for (const parent of condition.anyParent.parents) {
+      walkTarget({
+        objectName: parent.object,
+        rules,
+        chain: widenChainForPolymorphicTarget(chain),
+        budget,
+        describeRule,
+      });
+    }
+
+    return;
+  }
+
+  if ('linked' in condition) {
+    for (const objectName of condition.linked.objects) {
+      walkTarget({
+        objectName,
+        rules,
+        chain: widenChainForPolymorphicTarget(chain),
+        budget,
+        describeRule,
+      });
+    }
   }
 };
 
-const enterObject = ({
+const walkTarget = ({
   objectName,
-  objectPath,
-  cycleExemptObjectName,
+  rules,
+  chain,
+  budget,
   describeRule,
 }: {
   objectName: string;
-  objectPath: string[];
-  // See the compiler's state field of the same name: a write-parent walk starts
-  // at the row being written, so the parent's rule reaching that object again is
-  // other rows of it under their own rule, not a cycle
-  cycleExemptObjectName?: string;
+  rules: OnemaAccessRules;
+  chain: ObjectChain;
+  budget: ConditionBudget;
   describeRule: string;
-}): string[] => {
-  if (objectPath.includes(objectName) && objectName !== cycleExemptObjectName) {
+}): void =>
+  walkObject({
+    objectName,
+    rules,
+    chain: enterObject({ objectName, chain, describeRule }),
+    budget,
+    describeRule,
+  });
+
+const widenChainForPolymorphicTarget = (chain: ObjectChain): ObjectChain => ({
+  ...chain,
+  maxObjectDepth: Math.max(
+    chain.maxObjectDepth,
+    ONEMA_MAX_RULE_DEPTH_THROUGH_POLYMORPHIC_TARGET,
+  ),
+});
+
+const enterObject = ({
+  objectName,
+  chain,
+  describeRule,
+}: {
+  objectName: string;
+  chain: ObjectChain;
+  describeRule: string;
+}): ObjectChain => {
+  if (
+    closesOnemaRuleCycle({
+      objectPath: chain.objectPath,
+      objectName,
+      cycleExemptObjectName: chain.cycleExemptObjectName,
+    })
+  ) {
     throw new OnemaAccessException(
       `Onema access rules form a cycle reachable from object ${describeRule}: ${[
-        ...objectPath,
+        ...chain.objectPath,
         objectName,
       ].join(' -> ')}`,
       OnemaAccessExceptionCode.INVALID_RULES,
     );
   }
 
-  const nextObjectPath = [...objectPath, objectName];
+  const objectPath = [...chain.objectPath, objectName];
 
-  if (nextObjectPath.length > ONEMA_MAX_RULE_DEPTH) {
+  if (objectPath.length > chain.maxObjectDepth) {
     throw new OnemaAccessException(
-      `Onema access rules nest deeper than ${ONEMA_MAX_RULE_DEPTH} objects from object ${describeRule}: ${nextObjectPath.join(
+      `Onema access rules nest deeper than ${chain.maxObjectDepth} objects from object ${describeRule}: ${objectPath.join(
         ' -> ',
       )}`,
       OnemaAccessExceptionCode.INVALID_RULES,
     );
   }
 
-  return nextObjectPath;
+  return { ...chain, objectPath };
 };

@@ -7,6 +7,8 @@ export type OnemaCondition =
   | { eq: [string, OnemaConditionValue] }
   | { exists: OnemaExistsCondition }
   | { parent: OnemaParentCondition }
+  | { anyParent: OnemaAnyParentCondition }
+  | { linked: OnemaLinkedCondition }
   | { and: OnemaCondition[] }
   | { or: OnemaCondition[] };
 
@@ -21,6 +23,24 @@ export type OnemaExistsCondition = {
 export type OnemaParentCondition = {
   foreignKey: string;
   object: string;
+};
+
+// rls-design §3.1, §5. A polymorphic link is not one foreign key but a set of
+// `target*Id` columns of which at most one is filled, so the record follows
+// whichever parent it actually has. Every parent is spelled out — the object as
+// well as the key — because the load-time cycle and depth checks run on the
+// file alone, before any workspace metadata is in hand.
+export type OnemaAnyParentCondition = {
+  parents: OnemaParentCondition[];
+};
+
+// rls-design §3.1, §5. `timelineActivity` points at its source record by
+// object metadata id plus record id, so the branch is picked by comparing the
+// stored metadata id against the one each named object has in this workspace.
+export type OnemaLinkedCondition = {
+  objectIdField: string;
+  recordIdField: string;
+  objects: string[];
 };
 
 export type OnemaRoleKey = string;

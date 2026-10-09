@@ -6,6 +6,7 @@ import { ONEMA_ACCESS_LOGGER_CONTEXT } from 'src/engine/onema-access/constants/o
 import {
   type OnemaAccessRules,
   type OnemaCondition,
+  type OnemaLinkedCondition,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { resolveOnemaFieldColumnNames } from 'src/engine/onema-access/utils/resolve-onema-field-columns.util';
 import { type WorkspaceTableShape } from 'src/engine/twenty-orm/table-shape/types/workspace-table-shape.type';
@@ -412,12 +413,68 @@ const collectConditionProblems = ({
     return;
   }
 
-  const { foreignKey, object } = condition.parent;
-  const parentTableShape = resolveTableShape({ objectName: object, metadata });
+  if ('anyParent' in condition) {
+    for (const parent of condition.anyParent.parents) {
+      collectParentProblems({
+        parent,
+        label: 'anyParent',
+        tableShape,
+        metadata,
+        describe,
+        problems,
+      });
+    }
+
+    return;
+  }
+
+  if ('linked' in condition) {
+    collectLinkedProblems({
+      condition: condition.linked,
+      tableShape,
+      metadata,
+      describe,
+      problems,
+    });
+
+    return;
+  }
+
+  collectParentProblems({
+    parent: condition.parent,
+    label: 'parent',
+    tableShape,
+    metadata,
+    describe,
+    problems,
+  });
+};
+
+const collectParentProblems = ({
+  parent,
+  label,
+  tableShape,
+  metadata,
+  describe,
+  problems,
+}: {
+  parent: { foreignKey: string; object: string };
+  label: 'parent' | 'anyParent';
+  tableShape: WorkspaceTableShape;
+  metadata: MetadataView;
+  describe: (problem: string) => string;
+  problems: string[];
+}): void => {
+  const parentTableShape = resolveTableShape({
+    objectName: parent.object,
+    metadata,
+  });
 
   if (!isDefined(parentTableShape)) {
     problems.push(
-      describe(`parent names no object of this workspace ("${object}")`),
+      describe(
+        `${label} names no object of this workspace ("${parent.object}")`,
+      ),
     );
 
     return;
@@ -425,11 +482,57 @@ const collectConditionProblems = ({
 
   collectRelationProblems({
     ownerTableShape: tableShape,
-    fieldName: foreignKey,
+    fieldName: parent.foreignKey,
     expectedTargetTableShape: parentTableShape,
-    describe: (problem) => describe(`parent.foreignKey ${problem}`),
+    describe: (problem) => describe(`${label}.foreignKey ${problem}`),
     problems,
   });
+};
+
+// Both fields hold a bare identifier rather than a foreign key — that is what
+// makes the link polymorphic — so a relation field named here would compile
+// into a join column compared against an object metadata id, which matches
+// nothing and silently hides the whole feed
+const collectLinkedProblems = ({
+  condition,
+  tableShape,
+  metadata,
+  describe,
+  problems,
+}: {
+  condition: OnemaLinkedCondition;
+  tableShape: WorkspaceTableShape;
+  metadata: MetadataView;
+  describe: (problem: string) => string;
+  problems: string[];
+}): void => {
+  for (const fieldName of [condition.objectIdField, condition.recordIdField]) {
+    if (isDefined(tableShape.relationShapeByFieldName[fieldName])) {
+      problems.push(
+        describe(
+          `linked: "${fieldName}" of "${tableShape.nameSingular}" is a relation, not an identifier column`,
+        ),
+      );
+
+      continue;
+    }
+
+    if (!isDefined(tableShape.columnShapeByColumnName[fieldName])) {
+      problems.push(
+        describe(
+          `linked: "${fieldName}" is no field of "${tableShape.nameSingular}"`,
+        ),
+      );
+    }
+  }
+
+  for (const objectName of condition.objects) {
+    if (!isDefined(resolveTableShape({ objectName, metadata }))) {
+      problems.push(
+        describe(`linked names no object of this workspace ("${objectName}")`),
+      );
+    }
+  }
 };
 
 // A field that merely exists is not enough: `exists.projectMember.member` can be

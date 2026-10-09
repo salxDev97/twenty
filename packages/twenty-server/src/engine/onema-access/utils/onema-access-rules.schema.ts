@@ -9,6 +9,11 @@ const onemaConditionValueSchema = z.union([
   z.null(),
 ]);
 
+const onemaParentConditionSchema = z.strictObject({
+  foreignKey: z.string().min(1),
+  object: z.string().min(1),
+});
+
 export const onemaConditionSchema: z.ZodType<OnemaCondition> = z.lazy(() =>
   z.union([
     z.strictObject({ all: z.literal(true) }),
@@ -23,9 +28,18 @@ export const onemaConditionSchema: z.ZodType<OnemaCondition> = z.lazy(() =>
       }),
     }),
     z.strictObject({
-      parent: z.strictObject({
-        foreignKey: z.string().min(1),
-        object: z.string().min(1),
+      parent: onemaParentConditionSchema,
+    }),
+    z.strictObject({
+      anyParent: z.strictObject({
+        parents: z.array(onemaParentConditionSchema).min(1),
+      }),
+    }),
+    z.strictObject({
+      linked: z.strictObject({
+        objectIdField: z.string().min(1),
+        recordIdField: z.string().min(1),
+        objects: z.array(z.string().min(1)).min(1),
       }),
     }),
     z.strictObject({ and: z.array(onemaConditionSchema).min(1) }),

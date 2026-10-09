@@ -1,3 +1,4 @@
+import { ONEMA_MAX_CONDITIONS_PER_RULE } from 'src/engine/onema-access/constants/onema-access.constants';
 import { OnemaAccessException } from 'src/engine/onema-access/exceptions/onema-access.exception';
 import { parseOnemaAccessRules } from 'src/engine/onema-access/utils/parse-onema-access-rules.util';
 
@@ -397,14 +398,19 @@ describe('parseOnemaAccessRules', () => {
         objects: {
           opportunity: {
             sales: {
-              or: Array.from({ length: 64 }, (_unused, index) => ({
-                eq: ['stage', `stage-${index}`],
-              })),
+              or: Array.from(
+                { length: ONEMA_MAX_CONDITIONS_PER_RULE + 1 },
+                (_unused, index) => ({
+                  eq: ['stage', `stage-${index}`],
+                }),
+              ),
             },
           },
         },
       }),
-    ).toThrow(/more than 32 conditions/);
+    ).toThrow(
+      new RegExp(`more than ${ONEMA_MAX_CONDITIONS_PER_RULE} conditions`),
+    );
   });
 
   it('rejects a parent chain deeper than three objects', () => {

@@ -2,6 +2,7 @@ import { isDefined } from 'twenty-shared/utils';
 
 import {
   ONEMA_MAX_RULE_DEPTH,
+  ONEMA_MAX_RULE_DEPTH_THROUGH_POLYMORPHIC_TARGET,
   ONEMA_PARAMETER_PREFIX,
 } from 'src/engine/onema-access/constants/onema-access.constants';
 import {
@@ -12,8 +13,10 @@ import { closesOnemaRuleCycle } from 'src/engine/onema-access/utils/closes-onema
 import {
   type OnemaAccessRules,
   type OnemaAccessSubject,
+  type OnemaAnyParentCondition,
   type OnemaCondition,
   type OnemaConditionValue,
+  type OnemaLinkedCondition,
   type OnemaParentCondition,
   type OnemaRowAccess,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
@@ -57,6 +60,14 @@ type CompilationState = {
   cycleExemptObjectName?: string;
 };
 
+// The objects already on the path, and how many the path may still hold: a
+// polymorphic hop raises the budget once (see the constant), so the two travel
+// together rather than the depth limit being read from a constant at each hop
+type ObjectChain = {
+  objectPath: string[];
+  maxObjectDepth: number;
+};
+
 export const buildOnemaCompilationContext = ({
   rules,
   subject,
@@ -90,7 +101,10 @@ export const compileOnemaRowAccess = ({
   return compileObjectAccess({
     tableShape,
     tableAlias,
-    objectPath: [tableShape.nameSingular],
+    chain: {
+      objectPath: [tableShape.nameSingular],
+      maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
+    },
     state: {
       context,
       namePrefix: `${ONEMA_PARAMETER_PREFIX}_${parameterNamespace}_${sanitizeNamePart(
@@ -144,7 +158,10 @@ export const compileOnemaWriteParentAccess = ({
         condition: { parent },
         tableShape,
         tableAlias,
-        objectPath: [tableShape.nameSingular],
+        chain: {
+          objectPath: [tableShape.nameSingular],
+          maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
+        },
         state,
       });
 
@@ -182,12 +199,12 @@ export const combineOnemaRowAccess = (
 const compileObjectAccess = ({
   tableShape,
   tableAlias,
-  objectPath,
+  chain,
   state,
 }: {
   tableShape: WorkspaceTableShape;
   tableAlias: string;
-  objectPath: string[];
+  chain: ObjectChain;
   state: CompilationState;
 }): OnemaRowAccess => {
   const conditionByRoleKey =
@@ -211,7 +228,7 @@ const compileObjectAccess = ({
         condition,
         tableShape,
         tableAlias,
-        objectPath,
+        chain,
         state,
       }),
     ),
@@ -223,13 +240,13 @@ const compileCondition = ({
   condition,
   tableShape,
   tableAlias,
-  objectPath,
+  chain,
   state,
 }: {
   condition: OnemaCondition;
   tableShape: WorkspaceTableShape;
   tableAlias: string;
-  objectPath: string[];
+  chain: ObjectChain;
   state: CompilationState;
 }): OnemaRowAccess => {
   if ('all' in condition) {
@@ -245,7 +262,7 @@ const compileCondition = ({
           condition: operand,
           tableShape,
           tableAlias,
-          objectPath,
+          chain,
           state,
         }),
       ),
@@ -261,7 +278,27 @@ const compileCondition = ({
     return compileExists({
       condition,
       tableAlias,
-      objectPath,
+      chain,
+      state,
+    });
+  }
+
+  if ('anyParent' in condition) {
+    return compileAnyParent({
+      condition,
+      tableShape,
+      tableAlias,
+      chain,
+      state,
+    });
+  }
+
+  if ('linked' in condition) {
+    return compileLinked({
+      condition,
+      tableShape,
+      tableAlias,
+      chain,
       state,
     });
   }
@@ -270,7 +307,7 @@ const compileCondition = ({
     condition,
     tableShape,
     tableAlias,
-    objectPath,
+    chain,
     state,
   });
 };
@@ -315,14 +352,14 @@ const compileEquality = ({
 const compileExists = ({
   condition,
   tableAlias,
-  objectPath,
+  chain,
   state,
 }: {
   condition: {
     exists: { object: string; backForeignKey: string; where?: OnemaCondition };
   };
   tableAlias: string;
-  objectPath: string[];
+  chain: ObjectChain;
   state: CompilationState;
 }): OnemaRowAccess => {
   const { object, backForeignKey, where } = condition.exists;
@@ -333,16 +370,13 @@ const compileExists = ({
   // The target of an exists is one more object on the chain, exactly like the
   // target of a parent: without counting it, exists → parent → exists walks
   // past the depth limit and can revisit an object it already joined
-  const nextObjectPath = [...objectPath, targetTableShape.nameSingular];
+  const nextChain = enterObject({
+    chain,
+    objectName: targetTableShape.nameSingular,
+    state,
+  });
 
-  if (
-    closesACycle({
-      objectPath,
-      objectName: targetTableShape.nameSingular,
-      state,
-    }) ||
-    nextObjectPath.length > ONEMA_MAX_RULE_DEPTH
-  ) {
+  if (!isDefined(nextChain)) {
     return { kind: 'denied' };
   }
 
@@ -358,7 +392,7 @@ const compileExists = ({
   const targetAccess = compileObjectAccess({
     tableShape: targetTableShape,
     tableAlias: targetAlias,
-    objectPath: nextObjectPath,
+    chain: nextChain,
     state,
   });
 
@@ -385,7 +419,7 @@ const compileExists = ({
       condition: where,
       tableShape: targetTableShape,
       tableAlias: targetAlias,
-      objectPath: nextObjectPath,
+      chain: nextChain,
       state,
     });
 
@@ -418,13 +452,13 @@ const compileParent = ({
   condition,
   tableShape,
   tableAlias,
-  objectPath,
+  chain,
   state,
 }: {
   condition: { parent: { foreignKey: string; object: string } };
   tableShape: WorkspaceTableShape;
   tableAlias: string;
-  objectPath: string[];
+  chain: ObjectChain;
   state: CompilationState;
 }): OnemaRowAccess => {
   const { foreignKey, object } = condition.parent;
@@ -436,16 +470,13 @@ const compileParent = ({
     objectName: object,
     context: state.context,
   });
-  const nextObjectPath = [...objectPath, parentTableShape.nameSingular];
+  const nextChain = enterObject({
+    chain,
+    objectName: parentTableShape.nameSingular,
+    state,
+  });
 
-  if (
-    closesACycle({
-      objectPath,
-      objectName: parentTableShape.nameSingular,
-      state,
-    }) ||
-    nextObjectPath.length > ONEMA_MAX_RULE_DEPTH
-  ) {
+  if (!isDefined(nextChain)) {
     return { kind: 'denied' };
   }
 
@@ -453,7 +484,7 @@ const compileParent = ({
   const parentAccess = compileObjectAccess({
     tableShape: parentTableShape,
     tableAlias: parentAlias,
-    objectPath: nextObjectPath,
+    chain: nextChain,
     state,
   });
 
@@ -485,6 +516,127 @@ const compileParent = ({
         parentAccess.kind === 'gated' ? parentAccess.condition.parameters : {},
     },
   };
+};
+
+// rls-design §3.1: the record hangs off whichever target it actually has, so
+// every branch is the `parent` rule of that target and the row is visible as
+// soon as one of them lets it through. A row with no target filled satisfies no
+// branch — an orphan attachment stays hidden from everyone but the roles that
+// see all records, which is the policy, not an accident.
+const compileAnyParent = ({
+  condition,
+  tableShape,
+  tableAlias,
+  chain,
+  state,
+}: {
+  condition: { anyParent: OnemaAnyParentCondition };
+  tableShape: WorkspaceTableShape;
+  tableAlias: string;
+  chain: ObjectChain;
+  state: CompilationState;
+}): OnemaRowAccess =>
+  combineRowAccess(
+    condition.anyParent.parents.map((parent) =>
+      compileParent({
+        condition: { parent },
+        tableShape,
+        tableAlias,
+        chain: widenChainForPolymorphicTarget(chain),
+        state,
+      }),
+    ),
+    'OR',
+  );
+
+// rls-design §3.1: `timelineActivity` carries the diff of the record it is
+// about, so the row has to answer to that record's own rule. The object is
+// named by metadata id, which is why each branch pins the id before reaching
+// for the row. An object the rules do not name has no branch at all, and
+// neither has an empty `linkedObjectMetadataId`: both end closed, because the
+// row's content is the content of a record we have decided nothing about.
+const compileLinked = ({
+  condition,
+  tableShape,
+  tableAlias,
+  chain,
+  state,
+}: {
+  condition: { linked: OnemaLinkedCondition };
+  tableShape: WorkspaceTableShape;
+  tableAlias: string;
+  chain: ObjectChain;
+  state: CompilationState;
+}): OnemaRowAccess => {
+  const { objectIdField, recordIdField, objects } = condition.linked;
+  const objectIdColumnName = resolveColumnName({
+    tableShape,
+    fieldName: objectIdField,
+  });
+  const recordIdColumnName = resolveColumnName({
+    tableShape,
+    fieldName: recordIdField,
+  });
+  const widenedChain = widenChainForPolymorphicTarget(chain);
+
+  return combineRowAccess(
+    objects.map((objectName): OnemaRowAccess => {
+      const targetTableShape = resolveTableShape({
+        objectName,
+        context: state.context,
+      });
+      const nextChain = enterObject({
+        chain: widenedChain,
+        objectName: targetTableShape.nameSingular,
+        state,
+      });
+
+      if (!isDefined(nextChain)) {
+        return { kind: 'denied' };
+      }
+
+      const targetAlias = nextName(state, 't');
+      const targetAccess = compileObjectAccess({
+        tableShape: targetTableShape,
+        tableAlias: targetAlias,
+        chain: nextChain,
+        state,
+      });
+
+      if (targetAccess.kind === 'denied') {
+        return { kind: 'denied' };
+      }
+
+      const objectIdParameterName = nextName(state, 'p');
+      const predicates = [
+        `${quoteColumn(targetAlias, 'id')} = ${quoteColumn(tableAlias, recordIdColumnName)}`,
+      ];
+
+      if (targetTableShape.hasDeletedAtColumn) {
+        predicates.push(`${quoteColumn(targetAlias, 'deletedAt')} IS NULL`);
+      }
+
+      if (targetAccess.kind === 'gated') {
+        predicates.push(`(${targetAccess.condition.sql})`);
+      }
+
+      return {
+        kind: 'gated',
+        condition: {
+          sql: `(${quoteColumn(tableAlias, objectIdColumnName)} = :${objectIdParameterName} AND ${buildExistsSql(
+            { tableShape: targetTableShape, alias: targetAlias, predicates },
+          )})`,
+          parameters: {
+            [objectIdParameterName]: targetTableShape.objectMetadataId,
+            ...(targetAccess.kind === 'gated'
+              ? targetAccess.condition.parameters
+              : {}),
+          },
+        },
+      };
+    }),
+    'OR',
+  );
 };
 
 const combineRowAccess = (
@@ -595,20 +747,46 @@ const resolveColumnName = ({
   );
 };
 
-const closesACycle = ({
-  objectPath,
+// Undefined means the chain cannot be walked any further: either the object is
+// already on the path (a cycle the exemption does not buy) or the path has spent
+// its depth budget. Both end as "no rows", never as an error — the loader
+// refuses a file that can do this, so reaching here means the rules changed
+// under a running process.
+const enterObject = ({
+  chain,
   objectName,
   state,
 }: {
-  objectPath: string[];
+  chain: ObjectChain;
   objectName: string;
   state: CompilationState;
-}): boolean =>
-  closesOnemaRuleCycle({
-    objectPath,
-    objectName,
-    cycleExemptObjectName: state.cycleExemptObjectName,
-  });
+}): ObjectChain | undefined => {
+  if (
+    closesOnemaRuleCycle({
+      objectPath: chain.objectPath,
+      objectName,
+      cycleExemptObjectName: state.cycleExemptObjectName,
+    })
+  ) {
+    return undefined;
+  }
+
+  const objectPath = [...chain.objectPath, objectName];
+
+  if (objectPath.length > chain.maxObjectDepth) {
+    return undefined;
+  }
+
+  return { ...chain, objectPath };
+};
+
+const widenChainForPolymorphicTarget = (chain: ObjectChain): ObjectChain => ({
+  ...chain,
+  maxObjectDepth: Math.max(
+    chain.maxObjectDepth,
+    ONEMA_MAX_RULE_DEPTH_THROUGH_POLYMORPHIC_TARGET,
+  ),
+});
 
 const quoteColumn = (alias: string, columnName: string): string =>
   `${escapeIdentifier(alias)}.${escapeIdentifier(columnName)}`;

@@ -11,7 +11,20 @@
     "client": "00000000-0000-4000-8000-000000000008",
     "admin": "00000000-0000-4000-8000-000000000009"
   },
-  "requiredObjects": ["opportunity", "project", "task", "dataRoomItem"],
+  "requiredObjects": [
+    "opportunity",
+    "company",
+    "person",
+    "project",
+    "task",
+    "dataRoomItem",
+    "attachment",
+    "note",
+    "noteTarget",
+    "taskTarget",
+    "timelineActivity",
+    "onemaApprovalDecisionRecord"
+  ],
   "objects": {
     "opportunity": {
       "admin": { "all": true },
@@ -19,6 +32,42 @@
       "coo": { "all": true },
       "salesHead": { "all": true },
       "sales": { "eq": ["owner", "$me"] }
+    },
+    "company": {
+      "admin": { "all": true },
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "sales": {
+        "or": [
+          { "eq": ["accountOwner", "$me"] },
+          {
+            "exists": {
+              "object": "opportunity",
+              "backForeignKey": "company",
+              "where": { "eq": ["owner", "$me"] }
+            }
+          }
+        ]
+      }
+    },
+    "person": {
+      "admin": { "all": true },
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "sales": {
+        "or": [
+          { "parent": { "foreignKey": "company", "object": "company" } },
+          {
+            "exists": {
+              "object": "opportunity",
+              "backForeignKey": "pointOfContact",
+              "where": { "eq": ["owner", "$me"] }
+            }
+          }
+        ]
+      }
     },
     "project": {
       "admin": { "all": true },
@@ -69,6 +118,228 @@
           { "eq": ["visibleToClient", true] },
           { "parent": { "foreignKey": "project", "object": "project" } }
         ]
+      }
+    },
+    "attachment": {
+      "admin": { "all": true },
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "deliveryHead": { "all": true },
+      "sales": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "targetOpportunity", "object": "opportunity" },
+            { "foreignKey": "targetCompany", "object": "company" },
+            { "foreignKey": "targetPerson", "object": "person" },
+            { "foreignKey": "targetTask", "object": "task" },
+            { "foreignKey": "targetNote", "object": "note" }
+          ]
+        }
+      },
+      "projectManager": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "targetOpportunity", "object": "opportunity" },
+            { "foreignKey": "targetCompany", "object": "company" },
+            { "foreignKey": "targetPerson", "object": "person" },
+            { "foreignKey": "targetTask", "object": "task" },
+            { "foreignKey": "targetNote", "object": "note" }
+          ]
+        }
+      },
+      "contractor": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "targetTask", "object": "task" },
+            { "foreignKey": "targetNote", "object": "note" }
+          ]
+        }
+      }
+    },
+    "note": {
+      "admin": { "all": true },
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "deliveryHead": { "all": true },
+      "sales": {
+        "or": [
+          { "exists": { "object": "noteTarget", "backForeignKey": "note" } },
+          { "eq": ["createdByWorkspaceMemberId", "$me"] }
+        ]
+      },
+      "projectManager": {
+        "or": [
+          { "exists": { "object": "noteTarget", "backForeignKey": "note" } },
+          { "eq": ["createdByWorkspaceMemberId", "$me"] }
+        ]
+      },
+      "contractor": { "eq": ["createdByWorkspaceMemberId", "$me"] }
+    },
+    "noteTarget": {
+      "admin": { "all": true },
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "deliveryHead": { "all": true },
+      "sales": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "targetOpportunity", "object": "opportunity" }
+          ]
+        }
+      },
+      "projectManager": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "targetOpportunity", "object": "opportunity" }
+          ]
+        }
+      }
+    },
+    "taskTarget": {
+      "admin": { "all": true },
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "deliveryHead": { "all": true },
+      "sales": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "targetOpportunity", "object": "opportunity" },
+            { "foreignKey": "targetCompany", "object": "company" },
+            { "foreignKey": "targetPerson", "object": "person" }
+          ]
+        }
+      },
+      "projectManager": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "targetOpportunity", "object": "opportunity" },
+            { "foreignKey": "targetCompany", "object": "company" },
+            { "foreignKey": "targetPerson", "object": "person" }
+          ]
+        }
+      }
+    },
+    "timelineActivity": {
+      "admin": { "all": true },
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "deliveryHead": { "all": true },
+      "sales": {
+        "and": [
+          {
+            "anyParent": {
+              "parents": [
+                { "foreignKey": "targetOpportunity", "object": "opportunity" },
+                { "foreignKey": "targetCompany", "object": "company" },
+                { "foreignKey": "targetPerson", "object": "person" },
+                { "foreignKey": "targetTask", "object": "task" },
+                { "foreignKey": "targetNote", "object": "note" }
+              ]
+            }
+          },
+          {
+            "or": [
+              { "eq": ["linkedObjectMetadataId", null] },
+              {
+                "linked": {
+                  "objectIdField": "linkedObjectMetadataId",
+                  "recordIdField": "linkedRecordId",
+                  "objects": [
+                    "opportunity",
+                    "company",
+                    "person",
+                    "task",
+                    "note"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "projectManager": {
+        "and": [
+          {
+            "anyParent": {
+              "parents": [
+                { "foreignKey": "targetOpportunity", "object": "opportunity" },
+                { "foreignKey": "targetCompany", "object": "company" },
+                { "foreignKey": "targetPerson", "object": "person" },
+                { "foreignKey": "targetTask", "object": "task" },
+                { "foreignKey": "targetNote", "object": "note" }
+              ]
+            }
+          },
+          {
+            "or": [
+              { "eq": ["linkedObjectMetadataId", null] },
+              {
+                "linked": {
+                  "objectIdField": "linkedObjectMetadataId",
+                  "recordIdField": "linkedRecordId",
+                  "objects": [
+                    "opportunity",
+                    "company",
+                    "person",
+                    "task",
+                    "note"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "contractor": {
+        "and": [
+          {
+            "anyParent": {
+              "parents": [
+                { "foreignKey": "targetTask", "object": "task" }
+              ]
+            }
+          },
+          {
+            "or": [
+              { "eq": ["linkedObjectMetadataId", null] },
+              {
+                "linked": {
+                  "objectIdField": "linkedObjectMetadataId",
+                  "recordIdField": "linkedRecordId",
+                  "objects": ["task"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "onemaApprovalDecisionRecord": {
+      "admin": { "all": true },
+      "ceo": { "all": true },
+      "coo": { "all": true },
+      "salesHead": { "all": true },
+      "deliveryHead": { "all": true },
+      "sales": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "task", "object": "task" },
+            { "foreignKey": "opportunity", "object": "opportunity" }
+          ]
+        }
+      },
+      "projectManager": {
+        "anyParent": {
+          "parents": [
+            { "foreignKey": "task", "object": "task" },
+            { "foreignKey": "opportunity", "object": "opportunity" }
+          ]
+        }
       }
     }
   },
