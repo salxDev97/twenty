@@ -71,4 +71,5 @@ jobs:
             org.opencontainers.image.description=Onema build of Twenty (ADR-003, onema-access module)
 
       - name: Summary
-        run: echo "Image: ${{ steps.vars.outputs.image }}" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Image: ${{ steps.vars.outputs.image }}" >> "$GITHUB_STEP_SUMMARY"
