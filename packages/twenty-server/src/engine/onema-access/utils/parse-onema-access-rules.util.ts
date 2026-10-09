@@ -43,6 +43,7 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
   validateWriteParentChains(rules);
   validateWriteProtectedFields(rules);
   validateFreezeRules(rules);
+  validateTransitionRules(rules);
   validateOwnerDefaults(rules);
 
   return rules;
@@ -100,6 +101,54 @@ const validateWriteProtectedFields = (rules: OnemaAccessRules): void => {
         if (!isDefined(rules.roles[roleKey])) {
           throw new OnemaAccessException(
             `Onema access rules let role "${roleKey}" write protected field "${objectName}.${fieldName}" without declaring its role id`,
+            OnemaAccessExceptionCode.INVALID_RULES,
+          );
+        }
+      }
+    }
+  }
+};
+
+// rls-design §12а Т-3/Т-7 (hardening.md п. 3): an edge naming no human role is
+// the application alone, so a file that declares one without naming the
+// application has written an edge nobody can ever cross — the same slip
+// writeProtectedFields already refuses one level up. A `from` repeated inside
+// one object's rules is ambiguous about which edge a write is checked against,
+// and silently taking "the first match" would hide that two people wrote rules
+// for the same starting state without noticing each other.
+const validateTransitionRules = (rules: OnemaAccessRules): void => {
+  const transitionsByObjectName = Object.entries(rules.transitions ?? {});
+
+  const needsApplication = transitionsByObjectName.some(
+    ([, { rules: edges }]) => edges.some((edge) => edge.roleKeys.length === 0),
+  );
+
+  if (needsApplication && !isDefined(rules.application)) {
+    throw new OnemaAccessException(
+      'Onema access rules gate a status transition to the application but declare no "application": nothing would ever be allowed to make it',
+      OnemaAccessExceptionCode.INVALID_RULES,
+    );
+  }
+
+  for (const [objectName, { field, rules: edges }] of transitionsByObjectName) {
+    const seenFromValues = new Set<OnemaCondition['eq'][1]>();
+
+    for (const edge of edges) {
+      if (seenFromValues.has(edge.from)) {
+        throw new OnemaAccessException(
+          `Onema access rules declare two transitions of "${objectName}.${field}" starting from the same value (${JSON.stringify(
+            edge.from,
+          )})`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+
+      seenFromValues.add(edge.from);
+
+      for (const roleKey of edge.roleKeys) {
+        if (!isDefined(rules.roles[roleKey])) {
+          throw new OnemaAccessException(
+            `Onema access rules let role "${roleKey}" drive the transition of "${objectName}.${field}" without declaring its role id`,
             OnemaAccessExceptionCode.INVALID_RULES,
           );
         }

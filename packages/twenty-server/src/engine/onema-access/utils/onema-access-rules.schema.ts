@@ -56,6 +56,20 @@ const onemaFreezeRuleSchema = z.strictObject({
   isIrreversible: z.boolean().optional(),
 });
 
+const onemaTransitionRuleSchema = z.strictObject({
+  from: onemaConditionValueSchema,
+  to: z.array(onemaConditionValueSchema).min(1),
+  // `[]` is the way to say "the application alone" — see the type's own
+  // comment. Omitting the key entirely has no such reading, so it stays
+  // mandatory the same way writeProtectedFields' role list is
+  roleKeys: z.array(z.string().min(1)),
+});
+
+const onemaObjectTransitionRulesSchema = z.strictObject({
+  field: z.string().min(1),
+  rules: z.array(onemaTransitionRuleSchema).min(1),
+});
+
 export const onemaAccessRulesSchema = z.strictObject({
   // The value is a role universalIdentifier, which is a uuid for the roles
   // Twenty ships but a free-form string for the ones an application declares
@@ -98,6 +112,12 @@ export const onemaAccessRulesSchema = z.strictObject({
       )
       .min(1),
   ),
+  // Mandatory and `{}` for "no object has a guarded status field", for the
+  // same reason as writeProtectedFields and writeRequiresParentAccess: a
+  // forgotten key would leave every status transition open, and that has to
+  // look different in the file from a deliberate decision that nothing here
+  // needs a transition graph (hardening.md п. 3, rls-design §12а Т-3/Т-7)
+  transitions: z.record(z.string().min(1), onemaObjectTransitionRulesSchema),
   // Object -> role key -> the relation that holds the owner. Optional, unlike
   // the keys above, because forgetting it hides nothing: a record created
   // without its owner is refused by the check after the write, loudly, where a

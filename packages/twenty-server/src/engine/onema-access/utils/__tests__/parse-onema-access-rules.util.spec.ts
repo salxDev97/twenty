@@ -16,6 +16,7 @@ describe('parseOnemaAccessRules', () => {
       writeProtectedFields: {},
       writeRequiresParentAccess: {},
       freezeWhen: {},
+      transitions: {},
       objects: {
         opportunity: {
           ceo: { all: true },
@@ -54,6 +55,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { opportunity: { sales: { anyParent: { fks: ['leadId'] } } } },
       }),
     ).toThrow(OnemaAccessException);
@@ -76,6 +78,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/"project" as required but declare no rule/);
@@ -89,6 +92,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { project: {} },
       }),
     ).toThrow(/"project" as required but its rule names no role/);
@@ -102,6 +106,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { project: {} },
       }),
     ).not.toThrow();
@@ -118,6 +123,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           opportunity: { ceo: { all: true }, sales: { eq: ['owner', '$me'] } },
         },
@@ -133,6 +139,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { opportunity: { projectManager: { all: true } } },
       }),
     ).toThrow(/without declaring its role id/);
@@ -146,6 +153,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           project: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },
@@ -172,6 +180,7 @@ describe('parseOnemaAccessRules', () => {
         projectMember: [{ foreignKey: 'project', object: 'project' }],
       },
       freezeWhen: {},
+      transitions: {},
       objects: {
         project: {
           sales: {
@@ -200,6 +209,7 @@ describe('parseOnemaAccessRules', () => {
           dataRoomItem: [{ foreignKey: 'project', object: 'project' }],
         },
         freezeWhen: {},
+        transitions: {},
         objects: {
           project: {
             sales: { parent: { foreignKey: 'company', object: 'company' } },
@@ -225,6 +235,7 @@ describe('parseOnemaAccessRules', () => {
           dataRoomItem: [{ foreignKey: 'project', object: 'project' }],
         },
         freezeWhen: {},
+        transitions: {},
         objects: {
           project: {
             sales: { parent: { foreignKey: 'company', object: 'company' } },
@@ -256,6 +267,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           project: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },
@@ -278,6 +290,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           dataRoomItem: {
             sales: {
@@ -308,6 +321,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           project: {
             sales: {
@@ -342,6 +356,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           dataRoomItem: {
             sales: {
@@ -370,6 +385,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           project: {
             sales: {
@@ -395,6 +411,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           opportunity: {
             sales: {
@@ -421,6 +438,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           dataRoomItem: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },
@@ -445,6 +463,7 @@ describe('parseOnemaAccessRules', () => {
       requiredObjects: [],
       writeProtectedFields: {},
       freezeWhen: {},
+      transitions: {},
       writeRequiresParentAccess: {},
       objects: {
         attachment: {
@@ -476,6 +495,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        transitions: {},
         writeRequiresParentAccess: {},
         objects: {
           attachment: {
@@ -511,6 +531,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        transitions: {},
         writeRequiresParentAccess: {},
         objects: {
           attachment: {
@@ -536,6 +557,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        transitions: {},
         writeRequiresParentAccess: {},
         objects: {
           timelineActivity: {
@@ -560,6 +582,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        transitions: {},
         writeRequiresParentAccess: {},
         objects: {
           note: {
@@ -591,6 +614,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           note: {
             sales: { parent: { foreignKey: 'person', object: 'person' } },
@@ -629,6 +653,7 @@ describe('parseOnemaAccessRules', () => {
       requiredObjects: [],
       writeProtectedFields: {},
       freezeWhen: {},
+      transitions: {},
       objects,
     };
 
@@ -666,6 +691,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        transitions: {},
         objects: {
           project: {
             contractor: {
@@ -699,6 +725,7 @@ describe('parseOnemaAccessRules', () => {
           { field: 'onemaStage', equals: 'DEAL', fields: ['company'] },
         ],
       },
+      transitions: {},
     };
 
     expect(parseOnemaAccessRules(rules)).toEqual(rules);
@@ -710,6 +737,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         freezeWhen: {},
+        transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/writeProtectedFields/);
@@ -725,6 +753,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: { opportunity: { onemaPaymentConfirmation: [] } },
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/declare no "application"/);
@@ -739,6 +768,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: { opportunity: { orgRole: ['ceo'] } },
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/without declaring its role id/);
@@ -751,6 +781,7 @@ describe('parseOnemaAccessRules', () => {
       writeProtectedFields: {},
       writeRequiresParentAccess: {},
       freezeWhen: {},
+      transitions: {},
       objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
       ownerDefaults: { opportunity: { sales: 'owner' } },
     };
@@ -768,6 +799,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
         ownerDefaults: { opportunity: { sales: 'assignee' } },
       }),
@@ -782,6 +814,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        transitions: {},
         objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
         ownerDefaults: { opportunity: { ceo: 'owner' } },
       }),
@@ -796,6 +829,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: { opportunity: [] },
+        transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/freezeWhen/);
@@ -818,6 +852,7 @@ describe('parseOnemaAccessRules', () => {
             },
           ],
         },
+        transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/"isIrreversible" already does it/);
@@ -839,8 +874,101 @@ describe('parseOnemaAccessRules', () => {
             },
           ],
         },
+        transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/twice in one rule/);
+  });
+
+  it('accepts a transition graph using every edge shape of this release', () => {
+    const rules = {
+      application: 'onema-application',
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      transitions: {
+        onemaEstimate: {
+          field: 'status',
+          rules: [
+            { from: null, to: ['DRAFT'], roleKeys: ['sales'] },
+            { from: 'DRAFT', to: ['IN_REVIEW'], roleKeys: ['sales'] },
+            { from: 'IN_REVIEW', to: ['CEO_APPROVED'], roleKeys: [] },
+          ],
+        },
+      },
+      objects: { opportunity: { sales: { all: true } } },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  // The same slip writeProtectedFields already refuses one level up: an edge
+  // with no named role belongs to the application alone, and nothing can
+  // cross it if the file never says which application that is
+  it('rejects a transition gated to the application without declaring one', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        transitions: {
+          onemaEstimate: {
+            field: 'status',
+            rules: [{ from: 'IN_REVIEW', to: ['CEO_APPROVED'], roleKeys: [] }],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/declare no "application"/);
+  });
+
+  it('rejects a transition edge handed to a role nobody declared', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        transitions: {
+          onemaEstimate: {
+            field: 'status',
+            rules: [{ from: 'DRAFT', to: ['IN_REVIEW'], roleKeys: ['ceo'] }],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/without declaring its role id/);
+  });
+
+  // Two edges starting from the same value are ambiguous about which one a
+  // write is checked against, and silently taking the first would hide that
+  // two people wrote rules for the same state without noticing each other
+  it('rejects two transitions starting from the same value', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        transitions: {
+          onemaEstimate: {
+            field: 'status',
+            rules: [
+              { from: 'DRAFT', to: ['IN_REVIEW'], roleKeys: ['sales'] },
+              { from: 'DRAFT', to: ['ACCEPTED'], roleKeys: [] },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/starting from the same value/);
   });
 });

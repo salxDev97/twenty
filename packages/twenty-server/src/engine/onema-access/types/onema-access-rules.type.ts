@@ -82,6 +82,31 @@ export type OnemaWriteRequiresParentAccess = Record<
   OnemaParentCondition[]
 >;
 
+// rls-design §12а Т-3/Т-7 (hardening.md п. 3): one edge of the status graph of
+// an object — a single starting value and the values it may move to from
+// there, plus who besides the application may drive it. `null` in `from`
+// means "the field has never been set" (the row the insert path is about to
+// create), so the graph also names the states a record is allowed to be born
+// into. `roleKeys: []` means the edge belongs to the application alone — a
+// serverside command such as the CEO decision or the client acceptance, never
+// a role writing the status field itself over REST or GraphQL.
+export type OnemaTransitionRule = {
+  from: OnemaConditionValue;
+  to: OnemaConditionValue[];
+  roleKeys: OnemaRoleKey[];
+};
+
+// Keyed by object, then naming one status field of it. Only one field per
+// object is supported on purpose: a second status field of the same object
+// wants its own entry, and nothing here guesses which of two fields an edge
+// without a name belongs to.
+export type OnemaObjectTransitionRules = {
+  field: string;
+  rules: OnemaTransitionRule[];
+};
+
+export type OnemaTransitionRules = Record<string, OnemaObjectTransitionRules>;
+
 export type OnemaAccessRules = {
   // Role key of the rules file to the universalIdentifier of the Twenty role:
   // stable across reinstalls and renames, unlike a role id or a UI label
@@ -102,6 +127,11 @@ export type OnemaAccessRules = {
   // key leaves every access-granting link open, and reads exactly like a
   // deliberate "no link grants anybody access"
   writeRequiresParentAccess?: OnemaWriteRequiresParentAccess;
+  // Mandatory in a file for the same reason as writeProtectedFields and
+  // writeRequiresParentAccess: a forgotten key would leave every status
+  // transition of every object open, indistinguishable from "this object has
+  // no guarded status field"
+  transitions?: OnemaTransitionRules;
   ownerDefaults?: OnemaOwnerDefaults;
 };
 
