@@ -30,7 +30,10 @@ export const applyOnemaRowAccess = ({
   queryBuilder: WorkspaceSelectQueryBuilder;
   scope: OnemaAccessScope;
 }): void => {
-  const resolution = resolveOnemaAccess(scope);
+  const resolution = resolveOnemaAccess({
+    scope,
+    purpose: 'record-visibility',
+  });
 
   if (resolution.kind === 'inactive') {
     return;

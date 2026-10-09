@@ -795,10 +795,10 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     });
     // Onema fork (ADR-003), rls-design §3.2 point №4: the rows a write leaves
     // behind are read back under our own predicate, which only means anything if
-    // the write can still be rolled back — so it has to be in a transaction
-    const isOnemaWriteCheckActive =
-      !this.options.shouldBypassPermissionChecks &&
-      isOnemaAccessPossiblyActive();
+    // the write can still be rolled back — so it has to be in a transaction.
+    // The bypass is deliberately not a condition here: the freeze of §12а Т-2
+    // locks the row it compares, and a lock outside a transaction holds nothing
+    const isOnemaWriteCheckActive = isOnemaAccessPossiblyActive();
 
     if (validationRules.length === 0 && !isOnemaWriteCheckActive) {
       return write(this);
@@ -1953,6 +1953,16 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     columnsToReturn: string[];
     updatedColumns: string[];
   }): void {
+    // Onema fork (ADR-003), rls-design §12а Т-1: fields only our application may
+    // write. Here rather than per write path, because every one of them already
+    // passes through this method with the columns it is about to touch — and
+    // above the bypass, because a protected field is an invariant of the product
+    // rather than a permission of the caller (resolve-onema-access.util.ts)
+    assertOnemaProtectedFieldsAreWritable({
+      scope: this.onemaAccessScope,
+      updatedColumns,
+    });
+
     if (this.options.shouldBypassPermissionChecks) {
       return;
     }
@@ -1970,14 +1980,6 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       updatedColumns,
       authContext: this.options.authContext,
       isRecordSharingEnabled: this.isRecordSharingEnabled,
-    });
-
-    // Onema fork (ADR-003), rls-design §12а Т-1: fields only our application may
-    // write. Here rather than per write path, because every one of them already
-    // passes through this method with the columns it is about to touch
-    assertOnemaProtectedFieldsAreWritable({
-      scope: this.onemaAccessScope,
-      updatedColumns,
     });
   }
 

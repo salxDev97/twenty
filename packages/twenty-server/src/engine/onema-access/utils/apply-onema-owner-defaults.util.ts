@@ -30,7 +30,12 @@ export const applyOnemaOwnerDefaults = <
   scope: OnemaAccessScope;
   records: TRecord[];
 }): TRecord[] | undefined => {
-  const resolution = resolveOnemaAccess(scope);
+  // The default exists to keep a record visible to its author, so it answers to
+  // the same bypass as visibility itself: a system actor has no "$me" to write
+  const resolution = resolveOnemaAccess({
+    scope,
+    purpose: 'record-visibility',
+  });
 
   if (resolution.kind === 'inactive') {
     return undefined;

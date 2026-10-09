@@ -8,6 +8,7 @@ import {
   ceoAuthContext,
   otherApplicationAuthContext,
   SALES_ROLE_UNIVERSAL_IDENTIFIER,
+  systemAuthContext,
 } from 'src/engine/onema-access/__tests__/utils/build-test-access-scope.util';
 import { buildTestTableShape } from 'src/engine/onema-access/__tests__/utils/build-test-table-shape.util';
 import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
@@ -178,16 +179,51 @@ describe('assertOnemaProtectedFieldsAreWritable', () => {
     );
   });
 
-  it('does nothing for a caller holding the explicit bypass', () => {
+  // The bypass answers "may this actor see this row", which is a permission.
+  // Whether a field may still be written at all is an invariant of the product,
+  // and no worker, job or seeding context buys authority over it (Б2)
+  it('refuses a protected field written by a worker holding the bypass', () => {
     setOnemaAccessRulesForTesting(protectedRules);
 
     expect(() =>
       assertOnemaProtectedFieldsAreWritable({
         scope: buildTestAccessScope({
           tableShape: opportunityTableShape,
+          authContext: systemAuthContext,
           shouldBypassPermissionChecks: true,
         }),
         updatedColumns: ['onemaPaymentConfirmation'],
+      }),
+    ).toThrow(/written by the application only/);
+  });
+
+  // The explicit list of system actors the rules file names, and nothing else
+  it('lets our application write a protected field under the bypass', () => {
+    setOnemaAccessRulesForTesting(protectedRules);
+
+    expect(() =>
+      assertOnemaProtectedFieldsAreWritable({
+        scope: buildTestAccessScope({
+          tableShape: opportunityTableShape,
+          authContext: applicationAuthContext,
+          shouldBypassPermissionChecks: true,
+        }),
+        updatedColumns: ['onemaPaymentConfirmation'],
+      }),
+    ).not.toThrow();
+  });
+
+  it('leaves an unprotected field alone under the bypass', () => {
+    setOnemaAccessRulesForTesting(protectedRules);
+
+    expect(() =>
+      assertOnemaProtectedFieldsAreWritable({
+        scope: buildTestAccessScope({
+          tableShape: opportunityTableShape,
+          authContext: systemAuthContext,
+          shouldBypassPermissionChecks: true,
+        }),
+        updatedColumns: ['name'],
       }),
     ).not.toThrow();
   });

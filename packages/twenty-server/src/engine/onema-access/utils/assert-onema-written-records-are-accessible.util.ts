@@ -35,7 +35,10 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
   writtenRecords: Record<string, unknown>[];
   executeRaw: OnemaRawQueryExecutor;
 }): Promise<void> => {
-  const resolution = resolveOnemaAccess(scope);
+  const resolution = resolveOnemaAccess({
+    scope,
+    purpose: 'record-visibility',
+  });
 
   if (resolution.kind === 'inactive' || writtenRecords.length === 0) {
     return;

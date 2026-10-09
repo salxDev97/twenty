@@ -28,6 +28,22 @@ export type OnemaAccessScope = {
   shouldBypassPermissionChecks: boolean;
 };
 
+// Two different questions hide behind the one `shouldBypassPermissionChecks`
+// flag, and answering both with it is what let a worker walk past rls-design
+// §12а:
+//
+// - `record-visibility` — "may this actor see this row". That *is* a permission,
+//   and a caller that built the repository asking for permissions to be bypassed
+//   has already answered it. A system actor holds no role, so enforcing it would
+//   close every write of every worker instead of protecting anything.
+// - `write-invariant` — "may this field still be written at all". Т-1 and Т-2 are
+//   invariants of the product, not permissions of an actor: the field the
+//   approval decision is read from must not move under a worker any more than
+//   under a sales role. The bypass buys no authority here, and the only actors
+//   exempt are the ones the rules file names — our application, by its
+//   universalIdentifier.
+export type OnemaAccessPurpose = 'record-visibility' | 'write-invariant';
+
 // `refused` carries no condition to apply: a rules file that stopped parsing, or
 // that does not match this workspace, closes reads and writes alike rather than
 // falling back to upstream permissions (ADR-003: closed by default)
@@ -54,10 +70,14 @@ export const isOnemaAccessPossiblyActive = (): boolean => {
   return rulesState.isTestingOverride || isOnemaAccessEnforced();
 };
 
-export const resolveOnemaAccess = (
-  scope: OnemaAccessScope,
-): OnemaAccessResolution => {
-  if (scope.shouldBypassPermissionChecks) {
+export const resolveOnemaAccess = ({
+  scope,
+  purpose,
+}: {
+  scope: OnemaAccessScope;
+  purpose: OnemaAccessPurpose;
+}): OnemaAccessResolution => {
+  if (purpose === 'record-visibility' && scope.shouldBypassPermissionChecks) {
     return { kind: 'inactive' };
   }
 

@@ -35,7 +35,7 @@ export const assertOnemaFrozenFieldsAreUnchanged = ({
   scope: OnemaAccessScope;
   updates: OnemaFrozenFieldUpdate[];
 }): void => {
-  const resolution = resolveOnemaAccess(scope);
+  const resolution = resolveOnemaAccess({ scope, purpose: 'write-invariant' });
 
   if (resolution.kind === 'inactive') {
     return;

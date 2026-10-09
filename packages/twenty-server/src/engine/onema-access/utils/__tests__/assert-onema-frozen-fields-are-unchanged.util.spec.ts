@@ -2,6 +2,7 @@ import {
   applicationAuthContext,
   buildTestAccessScope,
   SALES_ROLE_UNIVERSAL_IDENTIFIER,
+  systemAuthContext,
 } from 'src/engine/onema-access/__tests__/utils/build-test-access-scope.util';
 import { buildTestTableShape } from 'src/engine/onema-access/__tests__/utils/build-test-table-shape.util';
 import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
@@ -178,13 +179,16 @@ describe('assertOnemaFrozenFieldsAreUnchanged', () => {
     ).toThrow(/Onema access rules refuse this write/);
   });
 
-  it('does nothing for a caller holding the explicit bypass', () => {
+  // A frozen field is an invariant of the product, not a permission of the
+  // caller, so a worker holding the bypass is no exception either (Б2)
+  it('refuses a worker holding the bypass just the same', () => {
     setOnemaAccessRulesForTesting(dealIsFinalRules);
 
     expect(() =>
       assertOnemaFrozenFieldsAreUnchanged({
         scope: buildTestAccessScope({
           tableShape: opportunityTableShape,
+          authContext: systemAuthContext,
           shouldBypassPermissionChecks: true,
         }),
         updates: [
@@ -192,6 +196,23 @@ describe('assertOnemaFrozenFieldsAreUnchanged', () => {
             rawRecordBefore: dealBefore,
             setColumns: { companyId: 'company-2' },
           },
+        ],
+      }),
+    ).toThrow(/opportunity\.company/);
+  });
+
+  it('leaves an unfrozen field alone under the bypass', () => {
+    setOnemaAccessRulesForTesting(dealIsFinalRules);
+
+    expect(() =>
+      assertOnemaFrozenFieldsAreUnchanged({
+        scope: buildTestAccessScope({
+          tableShape: opportunityTableShape,
+          authContext: systemAuthContext,
+          shouldBypassPermissionChecks: true,
+        }),
+        updates: [
+          { rawRecordBefore: dealBefore, setColumns: { name: 'Renamed' } },
         ],
       }),
     ).not.toThrow();
