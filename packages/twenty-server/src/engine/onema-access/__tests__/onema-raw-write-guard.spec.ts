@@ -10,6 +10,16 @@ const AUDITED_RAW_WRITE_FILES = [
   'engine/twenty-orm/repository/workspace-repository.ts',
 ];
 
+// The two raw executors of the ORM, and the guard each one has to carry. A
+// statement handed to either passes none of the write hooks, so both are checked
+// against the rules before they reach the database (rls-design §4, В3).
+const RAW_SQL_ENTRY_POINT_FILES = [
+  'engine/twenty-orm/repository/workspace-repository.ts',
+  'engine/twenty-orm/datasource/workspace-data-source.ts',
+];
+
+const RAW_SQL_GUARD = 'assertOnemaRawSqlIsPermitted';
+
 // `ON CONFLICT DO UPDATE` on a workspace record would update a row the insert
 // path never read, so the freeze would compare nothing and the check after the
 // write would never see it. ORM v2 builds `DO NOTHING` only, and this keeps it
@@ -19,7 +29,13 @@ const AUDITED_RAW_WRITE_FILES = [
 // is what the review asked for (Б3): the builders are where the clause belongs,
 // so a DO UPDATE appearing anywhere else is exactly the one worth catching —
 // and widening the scan is what turned up the three below.
-const ON_CONFLICT_DO_UPDATE = /ON\s+CONFLICT\b[\s\S]{0,200}?DO\s+UPDATE\b/i;
+//
+// Nothing bounds how far the action may sit from the clause it belongs to — a
+// column list, a `WHERE`, a formatted template literal — so the distance is not
+// bounded here either. The lookahead only keeps one clause from being paired
+// with the action of a later one; it never lets a pair through.
+const ON_CONFLICT_DO_UPDATE =
+  /\bON\s+CONFLICT\b(?:(?!\bON\s+CONFLICT\b)[\s\S])*?\bDO\s+UPDATE\b/i;
 
 // The four that were already there when this check was widened. None of them
 // writes a workspace record through the ORM. A fifth entry means somebody wrote
@@ -52,6 +68,11 @@ const WORKSPACE_RECORD_WRITE_DIRECTORIES = [
   'engine/twenty-orm/repository/',
 ];
 
+// A `.sql` file and a `.js` one reach the database exactly like a `.ts` one, and
+// scanning the TypeScript alone is what the review called a guard that does not
+// cover `src` (Б3)
+const SCANNED_EXTENSIONS = ['.ts', '.js', '.sql'];
+
 const listSourceFiles = (directory: string): string[] =>
   fs
     .readdirSync(directory, { withFileTypes: true })
@@ -64,7 +85,10 @@ const listSourceFiles = (directory: string): string[] =>
           : listSourceFiles(entryPath);
       }
 
-      return entry.isFile() && entry.name.endsWith('.ts') ? [entryPath] : [];
+      return entry.isFile() &&
+        SCANNED_EXTENSIONS.some((extension) => entry.name.endsWith(extension))
+        ? [entryPath]
+        : [];
     })
     .filter((filePath) => !filePath.endsWith('.spec.ts'));
 
@@ -86,6 +110,47 @@ describe('onema raw write guard', () => {
     expect(callers.map(relativeToSource).sort()).toEqual(
       [...AUDITED_RAW_WRITE_FILES].sort(),
     );
+  });
+
+  // The second raw executor went unguarded through three rounds of review
+  // precisely because nothing named it here
+  it.each(RAW_SQL_ENTRY_POINT_FILES)(
+    'guards the raw SQL of %s',
+    (relativePath) => {
+      expect(
+        fs.readFileSync(path.join(SERVER_SOURCE_ROOT, relativePath), 'utf-8'),
+      ).toContain(RAW_SQL_GUARD);
+    },
+  );
+
+  // A guard nobody calls protects nothing, and a third raw executor would be a
+  // third place to add one
+  it('keeps the guard to the raw executors that declare it', () => {
+    const callers = sourceFiles.filter((filePath) =>
+      fs.readFileSync(filePath, 'utf-8').includes(`${RAW_SQL_GUARD}({`),
+    );
+
+    expect(callers.map(relativeToSource).sort()).toEqual(
+      [...RAW_SQL_ENTRY_POINT_FILES].sort(),
+    );
+  });
+
+  // The clause and its action may sit any distance apart, and a bound on that
+  // distance is a hole the next upsert walks straight through
+  it('flags ON CONFLICT DO UPDATE however far apart the two halves are', () => {
+    expect(
+      ON_CONFLICT_DO_UPDATE.test(
+        `INSERT INTO "t" ("a") VALUES (1) ON CONFLICT ("a")${' '.repeat(5000)}DO UPDATE SET "a" = 1`,
+      ),
+    ).toBe(true);
+  });
+
+  it('does not flag an ON CONFLICT DO NOTHING followed by an unrelated clause', () => {
+    expect(
+      ON_CONFLICT_DO_UPDATE.test(
+        'INSERT INTO "t" ("a") VALUES (1) ON CONFLICT ("a") DO NOTHING',
+      ),
+    ).toBe(false);
   });
 
   it('keeps ON CONFLICT DO UPDATE out of every statement the server builds', () => {

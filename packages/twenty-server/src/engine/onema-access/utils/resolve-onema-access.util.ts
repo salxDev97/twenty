@@ -28,6 +28,11 @@ export type OnemaAccessScope = {
   shouldBypassPermissionChecks: boolean;
 };
 
+// The raw executor of the transaction scope belongs to no object, and nothing
+// the rules decide about a statement is read from the table the caller happens
+// to hold: the governed tables are resolved from the rules themselves
+export type OnemaAccessResolutionScope = Omit<OnemaAccessScope, 'tableShape'>;
+
 // Two different questions hide behind the one `shouldBypassPermissionChecks`
 // flag, and answering both with it is what let a worker walk past rls-design
 // §12а:
@@ -75,7 +80,7 @@ export const resolveOnemaAccess = ({
   scope,
   purpose,
 }: {
-  scope: OnemaAccessScope;
+  scope: OnemaAccessResolutionScope;
   purpose: OnemaAccessPurpose;
 }): OnemaAccessResolution => {
   if (purpose === 'record-visibility' && scope.shouldBypassPermissionChecks) {

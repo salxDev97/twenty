@@ -12,6 +12,8 @@ import { type ObjectLiteral } from 'typeorm';
 import { type WorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 import { findFlatEntityByIdInFlatEntityMapsOrThrow } from 'src/engine/metadata-modules/flat-entity/utils/find-flat-entity-by-id-in-flat-entity-maps-or-throw.util';
 import { type FlatObjectMetadata } from 'src/engine/metadata-modules/flat-object-metadata/types/flat-object-metadata.type';
+import { assertOnemaRawSqlIsPermitted } from 'src/engine/onema-access/utils/assert-onema-raw-sql-is-permitted.util';
+import { type OnemaAccessResolutionScope } from 'src/engine/onema-access/utils/resolve-onema-access.util';
 import { type WorkspaceInternalContext } from 'src/engine/twenty-orm/interfaces/workspace-internal-context.interface';
 import { type RolePermissionConfig } from 'src/engine/twenty-orm/types/role-permission-config.type';
 import { type WorkspaceTransactionScope } from 'src/engine/twenty-orm/types/workspace-transaction-scope.type';
@@ -119,8 +121,14 @@ export class WorkspaceDataSource {
               repositoryOptions?.shouldSkipEventEmission ?? false,
             internalContext: transactionalInternalContext,
           }),
-        executeRawQuery: (sql, parameters = []) =>
-          executor.execute({ text: sql, values: parameters }),
+        executeRawQuery: (sql, parameters = []) => {
+          // Onema fork (ADR-003), rls-design §4: the second raw executor. It
+          // passes none of the repository's write hooks either, so on an object
+          // the rules govern it may read and may lock, never write
+          assertOnemaRawSqlIsPermitted({ scope: this.onemaAccessScope, sql });
+
+          return executor.execute({ text: sql, values: parameters });
+        },
         afterCommit,
       }),
     );
@@ -137,6 +145,21 @@ export class WorkspaceDataSource {
     }
 
     return result;
+  }
+
+  // Onema fork (ADR-003): the raw executor below belongs to no object, so the
+  // scope carries only what the rules read — the actor, the workspace metadata
+  // and the way to name a governed object's table. `shouldBypassPermissionChecks`
+  // decides visibility alone, and a raw write is refused under the write
+  // invariant, which no bypass turns off (resolve-onema-access.util.ts).
+  private get onemaAccessScope(): OnemaAccessResolutionScope {
+    return {
+      authContext: this.authContext,
+      internalContext: this.internalContext,
+      tableShapeByObjectMetadataId: (objectMetadataId) =>
+        this.getTableShape(objectMetadataId),
+      shouldBypassPermissionChecks: false,
+    };
   }
 
   private async runInClientTransaction<T>(

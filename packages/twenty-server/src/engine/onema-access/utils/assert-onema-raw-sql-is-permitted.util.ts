@@ -7,7 +7,7 @@ import {
 } from 'src/engine/onema-access/utils/collect-onema-sql-write-targets.util';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
 import {
-  type OnemaAccessScope,
+  type OnemaAccessResolutionScope,
   resolveOnemaAccess,
 } from 'src/engine/onema-access/utils/resolve-onema-access.util';
 
@@ -39,7 +39,7 @@ export const assertOnemaRawSqlIsPermitted = ({
   scope,
   sql,
 }: {
-  scope: OnemaAccessScope;
+  scope: OnemaAccessResolutionScope;
   sql: string;
 }): void => {
   if (!POSSIBLY_WRITING.test(sql)) {
@@ -126,7 +126,7 @@ const resolveGovernedTableKeys = ({
   scope,
 }: {
   rules: OnemaAccessRules;
-  scope: OnemaAccessScope;
+  scope: OnemaAccessResolutionScope;
 }): Set<string> => {
   const governedTableKeys = new Set<string>();
 
