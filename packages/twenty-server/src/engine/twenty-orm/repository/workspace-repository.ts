@@ -30,6 +30,7 @@ import { applyOnemaRowAccess } from 'src/engine/onema-access/utils/apply-onema-r
 import { assertOnemaFrozenFieldsAreUnchanged } from 'src/engine/onema-access/utils/assert-onema-frozen-fields-are-unchanged.util';
 import { assertOnemaProtectedFieldsAreWritable } from 'src/engine/onema-access/utils/assert-onema-protected-fields-are-writable.util';
 import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
+import { lockOnemaFrozenRecordsForUpdate } from 'src/engine/onema-access/utils/lock-onema-frozen-records.util';
 import {
   isOnemaAccessPossiblyActive,
   type OnemaAccessScope,
@@ -1271,10 +1272,9 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     );
 
     // Onema fork (ADR-003), rls-design §12а Т-2
-    assertOnemaFrozenFieldsAreUnchanged({
-      scope: this.onemaAccessScope,
-      updates: updatesWithRecordBefore,
-    });
+    await this.assertOnemaFrozenFieldsAreUnchangedUnderLock(
+      updatesWithRecordBefore,
+    );
 
     await this.validateRLSPredicatesForUpdatedRecords(updatesWithRecordBefore);
 
@@ -1760,10 +1760,9 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       }));
 
       // Onema fork (ADR-003), rls-design §12а Т-2
-      assertOnemaFrozenFieldsAreUnchanged({
-        scope: this.onemaAccessScope,
-        updates: updatesWithRecordBefore,
-      });
+      await this.assertOnemaFrozenFieldsAreUnchangedUnderLock(
+        updatesWithRecordBefore,
+      );
 
       await this.validateRLSPredicatesForUpdatedRecords(
         updatesWithRecordBefore,
@@ -2222,6 +2221,34 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     // Onema fork (ADR-003): our own record-level rules, ANDed with whatever
     // upstream decided above; a no-op when no rules file is configured
     applyOnemaRowAccess({ queryBuilder, scope: this.onemaAccessScope });
+  }
+
+  // Onema fork (ADR-003), rls-design §12а Т-2. The rows are locked in the
+  // transaction that is about to write them, and the freeze compares the state
+  // read under that lock rather than the snapshot taken before it: two
+  // concurrent writers would otherwise both see a record that is not frozen yet
+  private async assertOnemaFrozenFieldsAreUnchangedUnderLock(
+    updates: {
+      rawRecordBefore: ObjectRecord;
+      setColumns: Record<string, unknown>;
+    }[],
+  ): Promise<void> {
+    const lockedRecordsById = await lockOnemaFrozenRecordsForUpdate({
+      scope: this.onemaAccessScope,
+      recordIds: updates
+        .map(({ rawRecordBefore }) => String(rawRecordBefore.id))
+        .filter(isNonEmptyString),
+      executeRaw: (sql, parameters) => this.executeRaw(sql, parameters),
+    });
+
+    assertOnemaFrozenFieldsAreUnchanged({
+      scope: this.onemaAccessScope,
+      updates: updates.map(({ rawRecordBefore, setColumns }) => ({
+        rawRecordBefore:
+          lockedRecordsById?.get(String(rawRecordBefore.id)) ?? rawRecordBefore,
+        setColumns,
+      })),
+    });
   }
 
   // Onema fork (ADR-003): what our rules need from the repository, gathered in
