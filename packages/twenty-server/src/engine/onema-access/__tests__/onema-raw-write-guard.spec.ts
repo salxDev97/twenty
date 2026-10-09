@@ -59,6 +59,15 @@ const ON_CONFLICT_DO_UPDATE_EXEMPT_FILES = [
   // Upstream's own note about TypeORM's upsert, on a repository whose header
   // says workspace data belongs to WorkspaceRepository instead
   'engine/twenty-orm/workspace-scoped-repository/workspace-scoped-repository.ts',
+  // Arrived with 2.46, and the check did its job: both write
+  // `agentChatThreadParticipant` — a workspace-schema table (ONE-113) — with
+  // raw SQL, past every hook. They stay because no rule of the file names an
+  // AI chat object and §12 keeps AI off in v1, not because raw upserts there
+  // are safe. `onema-write-path-inventory.spec.ts` holds the other half of
+  // that sentence: it fails the day a governed table is named in a raw
+  // statement, and the day either file moves or multiplies.
+  'database/commands/upgrade-version-command/2-46/utils/backfill-agent-chat-thread-inbox-state.util.ts',
+  'engine/metadata-modules/ai/ai-chat/services/agent-chat-thread-participant.service.ts',
 ];
 
 // Where a workspace record's own statements are built. The clause has no

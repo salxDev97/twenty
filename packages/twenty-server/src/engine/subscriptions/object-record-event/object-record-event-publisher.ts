@@ -39,6 +39,7 @@ import { RecordAccessPolicyService } from 'src/engine/core-modules/record-share/
 import { type EventRecordAccessGate } from 'src/engine/core-modules/record-share/types/event-record-access-gate.type';
 import { omitInheritedReadabilityChildRecords } from 'src/engine/core-modules/record-share/utils/omit-inherited-readability-child-records.util';
 import { omitRestrictedFieldsFromEvent } from 'src/engine/core-modules/record-share/utils/omit-restricted-fields-from-event.util';
+import { OnemaRealtimeRecordFilterService } from 'src/engine/onema-access/services/onema-realtime-record-filter.service';
 import { EventStreamService } from 'src/engine/subscriptions/event-stream.service';
 import { SubscriptionService } from 'src/engine/subscriptions/subscription.service';
 import {
@@ -80,6 +81,7 @@ export class ObjectRecordEventPublisher {
     private readonly workspaceManyOrAllFlatEntityMapsCacheService: WorkspaceManyOrAllFlatEntityMapsCacheService,
     private readonly commonSelectFieldsBuilder: CommonSelectFieldsBuilder,
     private readonly recordAccessPolicyService: RecordAccessPolicyService,
+    private readonly onemaRealtimeRecordFilterService: OnemaRealtimeRecordFilterService,
   ) {}
 
   async publish(
@@ -223,6 +225,22 @@ export class ObjectRecordEventPublisher {
       return;
     }
 
+    // Onema fork (ADR-003), rls-design §4 point №3. The gate above answers with
+    // upstream's rules; ours are a second, independent narrowing of the same
+    // list, and they have to run here rather than on the subscriber's next
+    // query — the event carries the record, not a reason to go and read it.
+    const deliverableRecordIds =
+      await this.narrowAdmittedRecordIdsWithOnemaRules({
+        admittedRecordIds,
+        objectNameSingular,
+        roleIds,
+        subscriberWorkspaceMemberId: subscriberAuthContext.workspaceMemberId,
+      });
+
+    if (deliverableRecordIds.size === 0) {
+      return;
+    }
+
     const restrictedFields =
       objectsPermissions[workspaceEventBatch.objectMetadata.id]
         ?.restrictedFields ?? {};
@@ -253,7 +271,7 @@ export class ObjectRecordEventPublisher {
         continue;
       }
 
-      if (!admittedRecordIds.has(filteredEvent.recordId)) {
+      if (!deliverableRecordIds.has(filteredEvent.recordId)) {
         continue;
       }
 
@@ -306,6 +324,31 @@ export class ObjectRecordEventPublisher {
         payload,
       });
     }
+  }
+
+  // Onema fork (ADR-003), rls-design §4 point №3. The ids handed over are the
+  // ones upstream already admitted, so what comes back can only be narrower; a
+  // subscriber the rules say nothing about keeps upstream's answer unchanged.
+  private async narrowAdmittedRecordIdsWithOnemaRules({
+    admittedRecordIds,
+    objectNameSingular,
+    roleIds,
+    subscriberWorkspaceMemberId,
+  }: {
+    admittedRecordIds: Set<string>;
+    objectNameSingular: string;
+    roleIds: string[];
+    subscriberWorkspaceMemberId: string | undefined;
+  }): Promise<Set<string>> {
+    const visibleRecordIds =
+      await this.onemaRealtimeRecordFilterService.resolveVisibleRecordIds({
+        objectNameSingular,
+        recordIds: [...admittedRecordIds],
+        roleIds,
+        workspaceMemberId: subscriberWorkspaceMemberId,
+      });
+
+    return visibleRecordIds ?? admittedRecordIds;
   }
 
   private async enrichEventBatchWithNestedRelations({

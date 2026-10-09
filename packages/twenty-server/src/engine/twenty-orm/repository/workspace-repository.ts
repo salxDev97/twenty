@@ -31,6 +31,8 @@ import { assertOnemaFrozenFieldsAreUnchanged } from 'src/engine/onema-access/uti
 import { assertOnemaProtectedFieldsAreWritable } from 'src/engine/onema-access/utils/assert-onema-protected-fields-are-writable.util';
 import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
 import { lockOnemaFrozenRecordsForUpdate } from 'src/engine/onema-access/utils/lock-onema-frozen-records.util';
+import { buildOnemaAccessSubject } from 'src/engine/onema-access/utils/resolve-onema-access-subject.util';
+import { resolveOnemaVisibleRecordIds } from 'src/engine/onema-access/utils/resolve-onema-visible-record-ids.util';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
 import { withOnemaReturnedIdColumn } from 'src/engine/onema-access/utils/with-onema-returned-id-column.util';
 import {
@@ -218,6 +220,36 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     const compiled = compileNamedParameters(sql, parameters);
 
     return this.options.executor.execute(compiled) as Promise<T[]>;
+  }
+
+  // Onema fork (ADR-003), rls-design §4 point №3. The realtime publisher holds
+  // ids and a subscriber, never a query, and that subscriber is not the actor
+  // this repository was built for — so the roles come in as an argument instead
+  // of being read from the auth context. `undefined` means the rules are not
+  // active here; the caller keeps whatever it decided on its own.
+  async resolveOnemaVisibleRecordIds({
+    recordIds,
+    roleIds,
+    workspaceMemberId,
+  }: {
+    recordIds: string[];
+    roleIds: string[];
+    workspaceMemberId: string | undefined;
+  }): Promise<Set<string> | undefined> {
+    return resolveOnemaVisibleRecordIds({
+      scope: {
+        ...this.onemaAccessScope,
+        // A stream is never a trusted caller, whatever built this repository
+        shouldBypassPermissionChecks: false,
+        subject: buildOnemaAccessSubject({
+          roleIds,
+          workspaceMemberId,
+          flatRoleMaps: this.options.internalContext.flatRoleMaps,
+        }),
+      },
+      recordIds,
+      executeRaw: (sql, parameters) => this.executeRaw(sql, parameters),
+    });
   }
 
   createQueryBuilder(alias?: string): WorkspaceSelectQueryBuilder {
