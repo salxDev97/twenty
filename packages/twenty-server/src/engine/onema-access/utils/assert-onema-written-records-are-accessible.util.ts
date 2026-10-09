@@ -1,12 +1,17 @@
 import { isNonEmptyString } from '@sniptt/guards';
 
-import { ONEMA_PARAMETER_PREFIX } from 'src/engine/onema-access/constants/onema-access.constants';
+import {
+  ONEMA_PARAMETER_PREFIX,
+  ONEMA_RECORD_ID_BATCH_SIZE,
+} from 'src/engine/onema-access/constants/onema-access.constants';
+import { chunkOnemaRecordIds } from 'src/engine/onema-access/utils/chunk-onema-record-ids.util';
 import { compileOnemaRowAccess } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
 import {
   type OnemaAccessScope,
   resolveOnemaAccess,
 } from 'src/engine/onema-access/utils/resolve-onema-access.util';
+import { type MutationKind } from 'src/engine/twenty-orm/sql/utils/build-mutation-statement.util';
 import { escapeIdentifier } from 'src/engine/workspace-manager/workspace-migration/utils/remove-sql-injection.util';
 
 const WRITTEN_RECORD_IDS_PARAMETER = `${ONEMA_PARAMETER_PREFIX}WrittenRecordIds`;
@@ -29,10 +34,16 @@ export type OnemaRawQueryExecutor = (
 export const assertOnemaWrittenRecordsAreAccessible = async ({
   scope,
   writtenRecords,
+  returningColumns,
+  mutationKind,
   executeRaw,
 }: {
   scope: OnemaAccessScope;
   writtenRecords: Record<string, unknown>[];
+  // What the write asked the database to give back. An empty result only proves
+  // "no row was touched" if the statement would have named the rows it touched
+  returningColumns: string[];
+  mutationKind: MutationKind | 'insert';
   executeRaw: OnemaRawQueryExecutor;
 }): Promise<void> => {
   const resolution = resolveOnemaAccess({
@@ -40,12 +51,26 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
     purpose: 'record-visibility',
   });
 
-  if (resolution.kind === 'inactive' || writtenRecords.length === 0) {
+  if (resolution.kind === 'inactive') {
     return;
   }
 
   if (resolution.kind === 'refused') {
     throw onemaWriteDenied(resolution.reason);
+  }
+
+  // The hole Б4 names: an empty list of written records used to end the check
+  // right here. A bulk update, delete or restore by filter that reports a count,
+  // or returns anything but ids, changes rows all the same — and the check would
+  // have declared them all fine without ever looking at one.
+  if (!returningColumns.includes('id')) {
+    throw onemaWriteDenied(
+      `a write on "${scope.tableShape.nameSingular}" that does not return the ids it touched cannot be checked`,
+    );
+  }
+
+  if (writtenRecords.length === 0) {
+    return;
   }
 
   const recordIds = writtenRecords
@@ -58,6 +83,12 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
     throw onemaWriteDenied(
       `${writtenRecords.length - recordIds.length} written record(s) of "${scope.tableShape.nameSingular}" came back without an id`,
     );
+  }
+
+  // There is no row left to read back, and which rows were deleted was already
+  // decided by the predicate of point №1 on the criteria of the delete itself
+  if (mutationKind === 'delete') {
+    return;
   }
 
   const tableAlias = scope.tableShape.nameSingular;
@@ -77,21 +108,32 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
     );
   }
 
-  const admittedRows = await executeRaw(
-    `SELECT ${escapeIdentifier(tableAlias)}."id" FROM ${escapeIdentifier(
-      scope.tableShape.schemaName,
-    )}.${escapeIdentifier(scope.tableShape.tableName)} AS ${escapeIdentifier(
-      tableAlias,
-    )} WHERE ${escapeIdentifier(tableAlias)}."id" IN (:...${WRITTEN_RECORD_IDS_PARAMETER}) AND (${rowAccess.condition.sql})`,
-    {
-      ...rowAccess.condition.parameters,
-      [WRITTEN_RECORD_IDS_PARAMETER]: recordIds,
-    },
-  );
+  const admittedRecordIds = new Set<string>();
 
-  const admittedRecordIds = new Set(
-    admittedRows.map((admittedRow) => String(admittedRow.id)),
-  );
+  // One statement per batch rather than one `IN` list of every id: an update by
+  // filter has no small bound on how many rows it touches, and each id is a bind
+  // parameter Postgres has to plan around (С3)
+  for (const recordIdBatch of chunkOnemaRecordIds(
+    recordIds,
+    ONEMA_RECORD_ID_BATCH_SIZE,
+  )) {
+    const admittedRows = await executeRaw(
+      `SELECT ${escapeIdentifier(tableAlias)}."id" FROM ${escapeIdentifier(
+        scope.tableShape.schemaName,
+      )}.${escapeIdentifier(scope.tableShape.tableName)} AS ${escapeIdentifier(
+        tableAlias,
+      )} WHERE ${escapeIdentifier(tableAlias)}."id" IN (:...${WRITTEN_RECORD_IDS_PARAMETER}) AND (${rowAccess.condition.sql})`,
+      {
+        ...rowAccess.condition.parameters,
+        [WRITTEN_RECORD_IDS_PARAMETER]: recordIdBatch,
+      },
+    );
+
+    for (const admittedRow of admittedRows) {
+      admittedRecordIds.add(String(admittedRow.id));
+    }
+  }
+
   const refusedRecordIds = recordIds.filter(
     (recordId) => !admittedRecordIds.has(recordId),
   );

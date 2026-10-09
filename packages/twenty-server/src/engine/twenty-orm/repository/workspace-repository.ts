@@ -782,18 +782,29 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
   private runWithValidationRules<TResult>({
     write,
     inputRecordIds,
+    mutationKind,
+    columnsToReturn,
   }: {
     write: (
       repository: WorkspaceRepository<TEntity>,
       validateWrittenRecords?: ValidateWrittenRecords,
     ) => Promise<TResult>;
     inputRecordIds?: (string | undefined)[];
+    // Onema fork (ADR-003): what the write is, and what it asked the database to
+    // give back, so the check after it can tell "no row was touched" from
+    // "nothing came back" (rls-design §11 «Запись», bulk rows)
+    mutationKind: MutationKind | 'insert';
+    columnsToReturn: string[];
   }): Promise<TResult> {
-    const validationRules = getActiveValidationRules({
-      flatValidationRuleMaps:
-        this.options.internalContext.flatValidationRuleMaps,
-      objectMetadataId: this.options.flatObjectMetadata.id,
-    });
+    // Upstream runs its validation rules on insert and update alone; wrapping
+    // the other kinds for our own check must not start running them too
+    const validationRules = ['insert', 'update'].includes(mutationKind)
+      ? getActiveValidationRules({
+          flatValidationRuleMaps:
+            this.options.internalContext.flatValidationRuleMaps,
+          objectMetadataId: this.options.flatObjectMetadata.id,
+        })
+      : [];
     // Onema fork (ADR-003), rls-design §3.2 point №4: the rows a write leaves
     // behind are read back under our own predicate, which only means anything if
     // the write can still be rolled back — so it has to be in a transaction.
@@ -811,6 +822,8 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
           await assertOnemaWrittenRecordsAreAccessible({
             scope: this.onemaAccessScope,
             writtenRecords,
+            returningColumns: columnsToReturn,
+            mutationKind,
             executeRaw: (sql, parameters) =>
               repository.executeRaw(sql, parameters),
           });
@@ -1035,6 +1048,8 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
   }> {
     return this.runWithValidationRules({
       inputRecordIds: args.records.map((record) => record.id),
+      mutationKind: 'insert',
+      columnsToReturn: args.columnsToReturn,
       write: (repository, validateWrittenRecords) =>
         repository.performInsert({ ...args, validateWrittenRecords }),
     });
@@ -1158,6 +1173,8 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
   }> {
     return this.runWithValidationRules({
       inputRecordIds: args.inputs.map((input) => input.id),
+      mutationKind: 'update',
+      columnsToReturn: args.columnsToReturn,
       write: (repository, validateWrittenRecords) =>
         repository.performBatchUpdate({ ...args, validateWrittenRecords }),
     });
@@ -1657,11 +1674,13 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     columnsToReturn: string[];
     data?: Partial<ObjectRecord>;
   }): Promise<ObjectRecord[]> {
-    if (args.kind !== 'update') {
-      return this.performMutation(args);
-    }
-
+    // Onema fork (ADR-003): every kind goes through here now, not update alone.
+    // A delete, a soft-delete or a restore by filter touches rows the check
+    // after the write has to see, and the rollback it rests on needs the
+    // transaction this opens (rls-design §11 «Запись», bulk rows)
     return this.runWithValidationRules({
+      mutationKind: args.kind,
+      columnsToReturn: args.columnsToReturn,
       write: (repository, validateWrittenRecords) =>
         repository.performMutation({
           ...args,

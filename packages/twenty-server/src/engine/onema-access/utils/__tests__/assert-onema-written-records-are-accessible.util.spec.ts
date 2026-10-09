@@ -5,10 +5,12 @@ import {
   WORKSPACE_MEMBER_ID,
 } from 'src/engine/onema-access/__tests__/utils/build-test-access-scope.util';
 import { buildTestTableShape } from 'src/engine/onema-access/__tests__/utils/build-test-table-shape.util';
+import { ONEMA_RECORD_ID_BATCH_SIZE } from 'src/engine/onema-access/constants/onema-access.constants';
 import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
 import { resetOnemaParameterNamespaceForTesting } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import { setOnemaAccessRulesForTesting } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
+import { type MutationKind } from 'src/engine/twenty-orm/sql/utils/build-mutation-statement.util';
 import { type WorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 
 const projectTableShape = buildTestTableShape({
@@ -38,10 +40,14 @@ const assertAccessible = ({
   writtenRecords,
   executeRaw,
   authContext,
+  returningColumns = ['id'],
+  mutationKind = 'update',
 }: {
   writtenRecords: Record<string, unknown>[];
   executeRaw: ReturnType<typeof buildExecuteRaw>;
   authContext?: WorkspaceAuthContext;
+  returningColumns?: string[];
+  mutationKind?: MutationKind | 'insert';
 }) =>
   assertOnemaWrittenRecordsAreAccessible({
     scope: buildTestAccessScope({
@@ -50,6 +56,8 @@ const assertAccessible = ({
       authContext,
     }),
     writtenRecords,
+    returningColumns,
+    mutationKind,
     executeRaw,
   });
 
@@ -147,6 +155,75 @@ describe('assertOnemaWrittenRecordsAreAccessible', () => {
     ).rejects.toThrow(/came back without an id/);
   });
 
+  // The hole Б4 names: an empty list used to end the check right here, and a
+  // bulk write reporting a count — or anything but ids — changes rows all the
+  // same. An empty list only proves "no row was touched" if the statement would
+  // have named the rows it did touch.
+  it('refuses a write that does not return the ids it touched', async () => {
+    setOnemaAccessRulesForTesting(taskFollowsItsProjectRules);
+
+    await expect(
+      assertAccessible({
+        writtenRecords: [],
+        executeRaw: buildExecuteRaw([]),
+        returningColumns: ['title'],
+      }),
+    ).rejects.toThrow(/does not return the ids it touched/);
+  });
+
+  it('accepts an empty result from a write that would have named its rows', async () => {
+    setOnemaAccessRulesForTesting(taskFollowsItsProjectRules);
+
+    const executeRaw = buildExecuteRaw([]);
+
+    await assertAccessible({ writtenRecords: [], executeRaw });
+
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  // Which rows a delete took was decided by the predicate of point №1 on its
+  // own criteria; there is no row left to read back
+  it('reads nothing back after a delete, but still demands the ids', async () => {
+    setOnemaAccessRulesForTesting(taskFollowsItsProjectRules);
+
+    const executeRaw = buildExecuteRaw([]);
+
+    await assertAccessible({
+      writtenRecords: [{ id: 'task-1' }],
+      executeRaw,
+      mutationKind: 'delete',
+    });
+
+    expect(executeRaw).not.toHaveBeenCalled();
+
+    await expect(
+      assertAccessible({
+        writtenRecords: [{ id: 'task-1' }],
+        executeRaw,
+        mutationKind: 'delete',
+        returningColumns: [],
+      }),
+    ).rejects.toThrow(/does not return the ids it touched/);
+  });
+
+  // С3: an update by filter has no small bound on how many rows it touches, and
+  // every id of them is a bind parameter
+  it('reads the written records back in batches rather than one statement', async () => {
+    setOnemaAccessRulesForTesting(taskFollowsItsProjectRules);
+
+    const writtenRecords = Array.from(
+      { length: ONEMA_RECORD_ID_BATCH_SIZE + 3 },
+      (_unused, index) => ({ id: `task-${index}` }),
+    );
+    const executeRaw = jest.fn(async (_sql, parameters) =>
+      (parameters.onemaWrittenRecordIds as string[]).map((id) => ({ id })),
+    ) as unknown as ReturnType<typeof buildExecuteRaw>;
+
+    await assertAccessible({ writtenRecords, executeRaw });
+
+    expect(executeRaw).toHaveBeenCalledTimes(2);
+  });
+
   it('refuses every write while the rules file is unusable', async () => {
     setOnemaAccessRulesForTesting({
       roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
@@ -173,6 +250,8 @@ describe('assertOnemaWrittenRecordsAreAccessible', () => {
         shouldBypassPermissionChecks: true,
       }),
       writtenRecords: [{ id: 'task-1' }],
+      returningColumns: ['id'],
+      mutationKind: 'update',
       executeRaw,
     });
 
