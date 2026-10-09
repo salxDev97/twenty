@@ -16,6 +16,7 @@ import { setPgDateTypeParser } from 'src/database/pg/set-pg-date-type-parser';
 import { ExceptionHandlerService } from 'src/engine/core-modules/exception-handler/exception-handler.service';
 import { LoggerService } from 'src/engine/core-modules/logger/logger.service';
 import { getSessionStorageOptions } from 'src/engine/core-modules/session-storage/session-storage.module-factory';
+import { loadOnemaAccessRulesOrThrow } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
 import { TwentyConfigService } from 'src/engine/core-modules/twenty-config/twenty-config.service';
 import { configTransformers } from 'src/engine/core-modules/twenty-config/utils/config-transformers.util';
 import { UsageRecorderService } from 'src/engine/core-modules/usage/services/usage-recorder.service';
@@ -31,6 +32,9 @@ import { enableValidationMetadataCache } from './utils/enable-validation-metadat
 const bootstrap = async () => {
   enableValidationMetadataCache();
   setPgDateTypeParser();
+  // Onema fork (ADR-003): a broken rules file must stop the server, not be
+  // discovered on the first query that should have been filtered
+  loadOnemaAccessRulesOrThrow();
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: process.env.LOGGER_IS_BUFFER_ENABLED === 'true',

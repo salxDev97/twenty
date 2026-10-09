@@ -28,6 +28,16 @@
       },
       "parallel": false
     },
+    "test:integration:onema-race": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "packages/twenty-server",
+        "commands": [
+          "NODE_ENV=test NODE_OPTIONS=\"--max-old-space-size=6144\" nx jest --config ./jest-integration-onema-race.config.ts --logHeapUsage"
+        ]
+      },
+      "parallel": false
+    },
     "test:integration": {
       "executor": "nx:run-commands",
       "options": {

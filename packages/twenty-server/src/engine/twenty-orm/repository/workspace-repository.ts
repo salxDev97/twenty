@@ -24,6 +24,19 @@ import {
   PermissionsExceptionCode,
   PermissionsExceptionMessage,
 } from 'src/engine/metadata-modules/permissions/permissions.exception';
+import { applyOnemaOwnerDefaults } from 'src/engine/onema-access/utils/apply-onema-owner-defaults.util';
+import { applyOnemaRowAccess } from 'src/engine/onema-access/utils/apply-onema-row-access.util';
+import { assertOnemaRawSqlIsPermitted } from 'src/engine/onema-access/utils/assert-onema-raw-sql-is-permitted.util';
+import { assertOnemaFrozenFieldsAreUnchanged } from 'src/engine/onema-access/utils/assert-onema-frozen-fields-are-unchanged.util';
+import { assertOnemaProtectedFieldsAreWritable } from 'src/engine/onema-access/utils/assert-onema-protected-fields-are-writable.util';
+import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
+import { lockOnemaFrozenRecordsForUpdate } from 'src/engine/onema-access/utils/lock-onema-frozen-records.util';
+import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
+import { withOnemaReturnedIdColumn } from 'src/engine/onema-access/utils/with-onema-returned-id-column.util';
+import {
+  isOnemaAccessPossiblyActive,
+  type OnemaAccessScope,
+} from 'src/engine/onema-access/utils/resolve-onema-access.util';
 import { FilesFieldSync } from 'src/engine/twenty-orm/field-operations/files-field-sync/files-field-sync';
 import {
   type OperationType,
@@ -185,6 +198,23 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     sql: string,
     parameters: Record<string, unknown>,
   ): Promise<T[]> {
+    // Onema fork (ADR-003), rls-design §4: raw SQL passes none of the hooks the
+    // write paths below carry, so on an object the rules govern it may read and
+    // may lock, never write
+    assertOnemaRawSqlIsPermitted({ scope: this.onemaAccessScope, sql });
+
+    return this.executeRawWrite<T>(sql, parameters);
+  }
+
+  // The one audited way to write through raw SQL, and the repository's own
+  // INSERT is its only caller: by the time it runs, the owner default, the
+  // protected fields, the freeze under a row lock and the transaction the check
+  // after the write rolls back are all already in place. A CI check keeps the
+  // caller list to one (onema-raw-write-guard.spec.ts).
+  private async executeRawWrite<T extends Record<string, unknown>>(
+    sql: string,
+    parameters: Record<string, unknown>,
+  ): Promise<T[]> {
     const compiled = compileNamedParameters(sql, parameters);
 
     return this.options.executor.execute(compiled) as Promise<T[]>;
@@ -268,6 +298,10 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       const records = await queryBuilder.getMany<ObjectRecord>();
       return records.map(({ id }) => id);
     } catch (error) {
+      // Onema fork (ADR-003): ONEMA_WRITE_DENIED deliberately does not land
+      // here. Upstream turns a denial into "these rows are not yours to write",
+      // which for an invariant of the product would drop the rows the rules
+      // refused and let the rest of the write go through silently.
       if (
         error instanceof PermissionsException &&
         error.code === PermissionsExceptionCode.PERMISSION_DENIED
@@ -775,33 +809,63 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
   private runWithValidationRules<TResult>({
     write,
     inputRecordIds,
+    mutationKind,
+    columnsToReturn,
   }: {
     write: (
       repository: WorkspaceRepository<TEntity>,
       validateWrittenRecords?: ValidateWrittenRecords,
     ) => Promise<TResult>;
     inputRecordIds?: (string | undefined)[];
+    // Onema fork (ADR-003): what the write is, and what it asked the database to
+    // give back, so the check after it can tell "no row was touched" from
+    // "nothing came back" (rls-design §11 «Запись», bulk rows)
+    mutationKind: MutationKind | 'insert';
+    columnsToReturn: string[];
   }): Promise<TResult> {
-    const validationRules = getActiveValidationRules({
-      flatValidationRuleMaps:
-        this.options.internalContext.flatValidationRuleMaps,
-      objectMetadataId: this.options.flatObjectMetadata.id,
-    });
+    // Upstream runs its validation rules on insert and update alone; wrapping
+    // the other kinds for our own check must not start running them too
+    const validationRules = ['insert', 'update'].includes(mutationKind)
+      ? getActiveValidationRules({
+          flatValidationRuleMaps:
+            this.options.internalContext.flatValidationRuleMaps,
+          objectMetadataId: this.options.flatObjectMetadata.id,
+        })
+      : [];
+    // Onema fork (ADR-003), rls-design §3.2 point №4: the rows a write leaves
+    // behind are read back under our own predicate, which only means anything if
+    // the write can still be rolled back — so it has to be in a transaction.
+    // The bypass is deliberately not a condition here: the freeze of §12а Т-2
+    // locks the row it compares, and a lock outside a transaction holds nothing
+    const isOnemaWriteCheckActive = isOnemaAccessPossiblyActive();
 
-    if (validationRules.length === 0) {
+    if (validationRules.length === 0 && !isOnemaWriteCheckActive) {
       return write(this);
     }
 
     return this.runAtomically((repository) =>
-      write(repository, (writtenRecords) =>
-        validateRecordsAgainstValidationRulesOrThrow({
-          repository,
-          tableShape: this.options.tableShape,
-          validationRules,
-          writtenRecords,
-          inputRecordIds,
-        }),
-      ),
+      write(repository, async (writtenRecords) => {
+        if (isOnemaWriteCheckActive) {
+          await assertOnemaWrittenRecordsAreAccessible({
+            scope: this.onemaAccessScope,
+            writtenRecords,
+            returningColumns: columnsToReturn,
+            mutationKind,
+            executeRaw: (sql, parameters) =>
+              repository.executeRaw(sql, parameters),
+          });
+        }
+
+        if (validationRules.length > 0) {
+          await validateRecordsAgainstValidationRulesOrThrow({
+            repository,
+            tableShape: this.options.tableShape,
+            validationRules,
+            writtenRecords,
+            inputRecordIds,
+          });
+        }
+      }),
     );
   }
 
@@ -1009,10 +1073,21 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     generatedMaps: ObjectRecord[];
     raw: ObjectRecord[];
   }> {
+    // Onema fork (ADR-003): the check after the write reads the ids out of what
+    // the statement returns, so the column is added to the list the write runs
+    // with rather than being demanded of the caller
+    const columnsToReturn = withOnemaReturnedIdColumn(args.columnsToReturn);
+
     return this.runWithValidationRules({
       inputRecordIds: args.records.map((record) => record.id),
+      mutationKind: 'insert',
+      columnsToReturn,
       write: (repository, validateWrittenRecords) =>
-        repository.performInsert({ ...args, validateWrittenRecords }),
+        repository.performInsert({
+          ...args,
+          columnsToReturn,
+          validateWrittenRecords,
+        }),
     });
   }
 
@@ -1056,14 +1131,28 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       recordsToInsert = enriched.entities as Partial<ObjectRecord>[];
     }
 
-    const { columnNames, rows, parameters, insertedColumns, formattedRecords } =
-      this.buildInsertRows(recordsToInsert);
+    const insertRows = this.buildInsertRows(recordsToInsert);
 
     this.validateWriteIsPermitted({
       operationType: 'insert',
       columnsToReturn,
-      updatedColumns: insertedColumns,
+      updatedColumns: insertRows.insertedColumns,
     });
+
+    // Onema fork (ADR-003), rls-design §3.3 point №5: an owner the rules read as
+    // "$me" is filled in when the caller left it empty, after the permission
+    // check on purpose — the role that needs the default is exactly the one that
+    // may not write the field itself
+    const onemaOwnedRecords = applyOnemaOwnerDefaults({
+      scope: this.onemaAccessScope,
+      records: recordsToInsert,
+    });
+
+    const { columnNames, rows, parameters, formattedRecords } = isDefined(
+      onemaOwnedRecords,
+    )
+      ? this.buildInsertRows(onemaOwnedRecords)
+      : insertRows;
 
     validateRLSPredicatesForRecords({
       records: this.formatResult<ObjectRecord[]>(formattedRecords),
@@ -1088,7 +1177,7 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       onConflictDoNothing,
     });
 
-    const rawRows = await this.executeRaw<ObjectRecord>(sql, parameters);
+    const rawRows = await this.executeRawWrite<ObjectRecord>(sql, parameters);
 
     await validateWrittenRecords?.(rawRows);
 
@@ -1118,10 +1207,18 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     generatedMaps: ObjectRecord[];
     raw: ObjectRecord[];
   }> {
+    const columnsToReturn = withOnemaReturnedIdColumn(args.columnsToReturn);
+
     return this.runWithValidationRules({
       inputRecordIds: args.inputs.map((input) => input.id),
+      mutationKind: 'update',
+      columnsToReturn,
       write: (repository, validateWrittenRecords) =>
-        repository.performBatchUpdate({ ...args, validateWrittenRecords }),
+        repository.performBatchUpdate({
+          ...args,
+          columnsToReturn,
+          validateWrittenRecords,
+        }),
     });
   }
 
@@ -1225,14 +1322,20 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       });
     }
 
-    await this.validateRLSPredicatesForUpdatedRecords(
-      setColumnsByInputIndex.flatMap((setColumns, index) =>
+    const updatesWithRecordBefore = setColumnsByInputIndex.flatMap(
+      (setColumns, index) =>
         rawBeforeByInputIndex[index].map((rawRecordBefore) => ({
           rawRecordBefore,
           setColumns,
         })),
-      ),
     );
+
+    // Onema fork (ADR-003), rls-design §12а Т-2
+    await this.assertOnemaFrozenFieldsAreUnchangedUnderLock(
+      updatesWithRecordBefore,
+    );
+
+    await this.validateRLSPredicatesForUpdatedRecords(updatesWithRecordBefore);
 
     for (const [index, input] of writableInputs.entries()) {
       const setColumns = setColumnsByInputIndex[index];
@@ -1614,14 +1717,19 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     columnsToReturn: string[];
     data?: Partial<ObjectRecord>;
   }): Promise<ObjectRecord[]> {
-    if (args.kind !== 'update') {
-      return this.performMutation(args);
-    }
+    // Onema fork (ADR-003): every kind goes through here now, not update alone.
+    // A delete, a soft-delete or a restore by filter touches rows the check
+    // after the write has to see, and the rollback it rests on needs the
+    // transaction this opens (rls-design §11 «Запись», bulk rows)
+    const columnsToReturn = withOnemaReturnedIdColumn(args.columnsToReturn);
 
     return this.runWithValidationRules({
+      mutationKind: args.kind,
+      columnsToReturn,
       write: (repository, validateWrittenRecords) =>
         repository.performMutation({
           ...args,
+          columnsToReturn,
           selectQueryBuilder:
             repository === this
               ? args.selectQueryBuilder
@@ -1646,6 +1754,11 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     data?: Partial<ObjectRecord>;
     validateWrittenRecords?: ValidateWrittenRecords;
   }): Promise<ObjectRecord[]> {
+    // Onema fork (ADR-003): a soft delete and a restore write `deletedAt` and
+    // nothing else, and used to arrive here with an empty list — so a rule
+    // naming that field protected or frozen never saw them (rls-design §12а)
+    const onemaDeletedAtColumns = this.resolveOnemaDeletedAtWrite(kind);
+
     this.validateWriteIsPermitted({
       operationType: kind,
       columnsToReturn,
@@ -1653,7 +1766,7 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
         ? Object.keys(this.formatWriteData(data)).filter(
             (column) => column !== 'id',
           )
-        : [],
+        : Object.keys(onemaDeletedAtColumns ?? {}),
     });
 
     if (!rowLevelPermissionsApplied) {
@@ -1723,6 +1836,23 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
       const { id: _id, ...columns } = this.formatWriteData(dataToWrite);
 
       setColumns = columns;
+    }
+
+    // Onema fork (ADR-003), rls-design §12а Т-2. Every kind that writes columns
+    // goes through the freeze, not the update alone: putting a frozen record
+    // away and bringing it back are writes on `deletedAt`, and a rule that
+    // freezes that field means the record may not leave the state it reached.
+    const onemaFrozenSetColumns = isDefined(setColumns)
+      ? setColumns
+      : onemaDeletedAtColumns;
+
+    if (isDefined(onemaFrozenSetColumns)) {
+      await this.assertOnemaFrozenFieldsAreUnchangedUnderLock(
+        recordsBefore.map((rawRecordBefore) => ({
+          rawRecordBefore,
+          setColumns: onemaFrozenSetColumns,
+        })),
+      );
     }
 
     if (kind === 'update' && isDefined(setColumns)) {
@@ -1912,6 +2042,16 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     columnsToReturn: string[];
     updatedColumns: string[];
   }): void {
+    // Onema fork (ADR-003), rls-design §12а Т-1: fields only our application may
+    // write. Here rather than per write path, because every one of them already
+    // passes through this method with the columns it is about to touch — and
+    // above the bypass, because a protected field is an invariant of the product
+    // rather than a permission of the caller (resolve-onema-access.util.ts)
+    assertOnemaProtectedFieldsAreWritable({
+      scope: this.onemaAccessScope,
+      updatedColumns,
+    });
+
     if (this.options.shouldBypassPermissionChecks) {
       return;
     }
@@ -2167,6 +2307,79 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
         operationType: 'select',
       });
     }
+
+    // Onema fork (ADR-003): our own record-level rules, ANDed with whatever
+    // upstream decided above; a no-op when no rules file is configured
+    applyOnemaRowAccess({ queryBuilder, scope: this.onemaAccessScope });
+  }
+
+  // Onema fork (ADR-003), rls-design §12а Т-2. The rows are locked in the
+  // transaction that is about to write them, and the freeze compares the state
+  // read under that lock rather than the snapshot taken before it: two
+  // concurrent writers would otherwise both see a record that is not frozen yet
+  private async assertOnemaFrozenFieldsAreUnchangedUnderLock(
+    updates: {
+      rawRecordBefore: ObjectRecord;
+      setColumns: Record<string, unknown>;
+    }[],
+  ): Promise<void> {
+    const lockedRecordsById = await lockOnemaFrozenRecordsForUpdate({
+      scope: this.onemaAccessScope,
+      recordIds: updates
+        .map(({ rawRecordBefore }) => String(rawRecordBefore.id))
+        .filter(isNonEmptyString),
+      executeRaw: (sql, parameters) => this.executeRaw(sql, parameters),
+    });
+
+    assertOnemaFrozenFieldsAreUnchanged({
+      scope: this.onemaAccessScope,
+      updates: updates.map(({ rawRecordBefore, setColumns }) => ({
+        // A row the lock did not return is a row this transaction does not hold:
+        // deleted by a concurrent writer, or never there. Comparing the
+        // unlocked snapshot instead is the race the lock exists for, so the
+        // write is refused rather than decided on a pre-image nothing pins.
+        rawRecordBefore: isDefined(lockedRecordsById)
+          ? (lockedRecordsById.get(String(rawRecordBefore.id)) ??
+            this.throwOnemaUnlockedRecord(String(rawRecordBefore.id)))
+          : rawRecordBefore,
+        setColumns,
+      })),
+    });
+  }
+
+  private throwOnemaUnlockedRecord(recordId: string): never {
+    throw onemaWriteDenied(
+      `the "${this.options.tableShape.nameSingular}" record ${recordId} could not be locked for the freeze comparison`,
+    );
+  }
+
+  // Onema fork (ADR-003): what a soft delete or a restore is about to write.
+  // Returns undefined for every other kind, and for an object with no such
+  // column — there is then nothing of this shape to protect or freeze.
+  private resolveOnemaDeletedAtWrite(
+    kind: MutationKind,
+  ): Record<string, unknown> | undefined {
+    if (!this.options.tableShape.hasDeletedAtColumn) {
+      return undefined;
+    }
+
+    if (kind === 'soft-delete') {
+      return { deletedAt: new Date() };
+    }
+
+    return kind === 'restore' ? { deletedAt: null } : undefined;
+  }
+
+  // Onema fork (ADR-003): what our rules need from the repository, gathered in
+  // one place so each hook site below stays a single call
+  private get onemaAccessScope(): OnemaAccessScope {
+    return {
+      tableShape: this.options.tableShape,
+      authContext: this.options.authContext,
+      internalContext: this.options.internalContext,
+      tableShapeByObjectMetadataId: this.options.tableShapeByObjectMetadataId,
+      shouldBypassPermissionChecks: this.options.shouldBypassPermissionChecks,
+    };
   }
 
   private applyRowLevelPermissionPredicateForAlias({

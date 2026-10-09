@@ -25,6 +25,12 @@ export const permissionGraphqlApiExceptionHandler = (
         userFriendlyMessage: msg`No valid authentication context found.`,
         subCode: error.code,
       });
+    // Onema fork (ADR-003): the same 403 as a denial, under its own subCode
+    case PermissionsExceptionCode.ONEMA_WRITE_DENIED:
+      throw new ForbiddenError(error.message, {
+        userFriendlyMessage: msg`This change is not allowed on this record.`,
+        subCode: error.code,
+      });
     case PermissionsExceptionCode.ROLE_LABEL_ALREADY_EXISTS:
       throw new ForbiddenError(error);
     case PermissionsExceptionCode.CANNOT_UNASSIGN_LAST_ADMIN:
