@@ -1,8 +1,9 @@
 import {
+  apiKeyAuthContext,
   buildTestAccessScope,
   CEO_ROLE_UNIVERSAL_IDENTIFIER,
   ceoAuthContext,
-  apiKeyAuthContext,
+  multiRoleAuthContext,
   SALES_ROLE_UNIVERSAL_IDENTIFIER,
   WORKSPACE_MEMBER_ID,
 } from 'src/engine/onema-access/__tests__/utils/build-test-access-scope.util';
@@ -11,13 +12,30 @@ import { type OnemaAccessRules } from 'src/engine/onema-access/types/onema-acces
 import { applyOnemaOwnerDefaults } from 'src/engine/onema-access/utils/apply-onema-owner-defaults.util';
 import { setOnemaAccessRulesForTesting } from 'src/engine/onema-access/utils/load-onema-access-rules.util';
 
+const workspaceMemberTableShape = buildTestTableShape({
+  nameSingular: 'workspaceMember',
+});
+
 const opportunityTableShape = buildTestTableShape({
   nameSingular: 'opportunity',
   columnNames: ['name'],
-  joinColumnNameByFieldName: { owner: 'ownerId' },
+  joinColumnNameByFieldName: { owner: 'ownerId', coOwner: 'coOwnerId' },
+  relationTargetByFieldName: {
+    owner: 'workspaceMember',
+    coOwner: 'workspaceMember',
+  },
 });
 
-const scope = buildTestAccessScope({ tableShape: opportunityTableShape });
+const buildScope = (
+  overrides: Partial<Parameters<typeof buildTestAccessScope>[0]> = {},
+) =>
+  buildTestAccessScope({
+    tableShape: opportunityTableShape,
+    tableShapes: [opportunityTableShape, workspaceMemberTableShape],
+    ...overrides,
+  });
+
+const scope = buildScope();
 
 const ownedByMeRules: OnemaAccessRules = {
   roles: {
@@ -30,6 +48,7 @@ const ownedByMeRules: OnemaAccessRules = {
       ceo: { all: true },
     },
   },
+  ownerDefaults: { opportunity: { sales: 'owner' } },
 };
 
 describe('applyOnemaOwnerDefaults', () => {
@@ -43,7 +62,7 @@ describe('applyOnemaOwnerDefaults', () => {
     ).toBeUndefined();
   });
 
-  it('fills the owner the rule reads as "$me" when the record leaves it empty', () => {
+  it('fills the owner the file names when the record leaves it empty', () => {
     setOnemaAccessRulesForTesting(ownedByMeRules);
 
     expect(
@@ -78,17 +97,53 @@ describe('applyOnemaOwnerDefaults', () => {
     ).toEqual([{ name: 'A lead', ownerId: WORKSPACE_MEMBER_ID }]);
   });
 
-  // A role that already sees every record of the object does not need an owner
-  // to find what it created, and handing it one would assign ownership silently
+  // A role that already sees every record of the object is named by no owner
+  // default, so it gets none — and ownership is never assigned silently
   it('substitutes nothing for a role the rules open entirely', () => {
     setOnemaAccessRulesForTesting(ownedByMeRules);
 
     expect(
       applyOnemaOwnerDefaults({
-        scope: buildTestAccessScope({
-          tableShape: opportunityTableShape,
-          authContext: ceoAuthContext,
-        }),
+        scope: buildScope({ authContext: ceoAuthContext }),
+        records: [{ name: 'A lead' }],
+      }),
+    ).toBeUndefined();
+  });
+
+  // Reading the default off the rule used to mean two roles answered "owner"
+  // and "everything", which is two answers, and the owner silently disappeared —
+  // leaving the record invisible to the very person who had just created it
+  it('still fills the owner for a person who also holds a role seeing everything', () => {
+    setOnemaAccessRulesForTesting(ownedByMeRules);
+
+    expect(
+      applyOnemaOwnerDefaults({
+        scope: buildScope({ authContext: multiRoleAuthContext }),
+        records: [{ name: 'A lead' }],
+      }),
+    ).toEqual([{ name: 'A lead', ownerId: WORKSPACE_MEMBER_ID }]);
+  });
+
+  // Two named roles pointing at two owner fields have no single answer, and the
+  // check after the write refuses the creation loudly instead
+  it('substitutes nothing when two roles of the holder name two owner fields', () => {
+    setOnemaAccessRulesForTesting({
+      roles: {
+        sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      objects: {
+        opportunity: {
+          sales: { eq: ['owner', '$me'] },
+          ceo: { eq: ['coOwner', '$me'] },
+        },
+      },
+      ownerDefaults: { opportunity: { sales: 'owner', ceo: 'coOwner' } },
+    });
+
+    expect(
+      applyOnemaOwnerDefaults({
+        scope: buildScope({ authContext: multiRoleAuthContext }),
         records: [{ name: 'A lead' }],
       }),
     ).toBeUndefined();
@@ -99,19 +154,19 @@ describe('applyOnemaOwnerDefaults', () => {
 
     expect(
       applyOnemaOwnerDefaults({
-        scope: buildTestAccessScope({
-          tableShape: opportunityTableShape,
-          authContext: apiKeyAuthContext,
-        }),
+        scope: buildScope({ authContext: apiKeyAuthContext }),
         records: [{ name: 'A lead' }],
       }),
     ).toBeUndefined();
   });
 
-  it('substitutes nothing when the object carries no rule at all', () => {
+  // The hole С1 names: `assignee`, `projectManager` and any future service field
+  // written as "mine" used to be filled with the current participant on their
+  // own, because the rule looked exactly like an owner rule
+  it('substitutes nothing for a rule that reads as "$me" without being declared an owner', () => {
     setOnemaAccessRulesForTesting({
       roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
-      objects: {},
+      objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
     });
 
     expect(
@@ -119,18 +174,10 @@ describe('applyOnemaOwnerDefaults', () => {
     ).toBeUndefined();
   });
 
-  // "Mine, or watched by me" has no single owner a new record should get, and
-  // guessing one would hand out ownership the file never asked for
-  it('substitutes nothing when the rule is more than a plain owner equality', () => {
+  it('substitutes nothing when the object carries no rule at all', () => {
     setOnemaAccessRulesForTesting({
       roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
-      objects: {
-        opportunity: {
-          sales: {
-            or: [{ eq: ['owner', '$me'] }, { eq: ['name', 'public lead'] }],
-          },
-        },
-      },
+      objects: {},
     });
 
     expect(
@@ -154,10 +201,7 @@ describe('applyOnemaOwnerDefaults', () => {
 
     expect(
       applyOnemaOwnerDefaults({
-        scope: buildTestAccessScope({
-          tableShape: opportunityTableShape,
-          shouldBypassPermissionChecks: true,
-        }),
+        scope: buildScope({ shouldBypassPermissionChecks: true }),
         records: [{ name: 'A lead' }],
       }),
     ).toBeUndefined();

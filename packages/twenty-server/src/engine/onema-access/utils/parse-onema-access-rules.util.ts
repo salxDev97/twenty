@@ -14,6 +14,8 @@ import {
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { onemaAccessRulesSchema } from 'src/engine/onema-access/utils/onema-access-rules.schema';
 
+const CURRENT_MEMBER_TOKEN = '$me';
+
 // A rules file that does not parse must stop the server, never degrade to a
 // permissive default (ADR-003: closed by default)
 export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
@@ -36,8 +38,42 @@ export const parseOnemaAccessRules = (rawRules: unknown): OnemaAccessRules => {
   validateObjectChains(rules);
   validateWriteProtectedFields(rules);
   validateFreezeRules(rules);
+  validateOwnerDefaults(rules);
 
   return rules;
+};
+
+// rls-design §3.3 point №5. A default is only ever useful where the rule reads
+// that very field as "mine": filling anything else hands out ownership no rule
+// looks at, and filling a field the role does not need leaves the record
+// visible to it for a reason the file never stated.
+const validateOwnerDefaults = (rules: OnemaAccessRules): void => {
+  for (const [objectName, fieldNameByRoleKey] of Object.entries(
+    rules.ownerDefaults ?? {},
+  )) {
+    for (const [roleKey, fieldName] of Object.entries(fieldNameByRoleKey)) {
+      if (!isDefined(rules.roles[roleKey])) {
+        throw new OnemaAccessException(
+          `Onema access rules fill the owner of "${objectName}" for role "${roleKey}" without declaring its role id`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+
+      const condition = rules.objects[objectName]?.[roleKey];
+
+      if (
+        !isDefined(condition) ||
+        !('eq' in condition) ||
+        condition.eq[0] !== fieldName ||
+        condition.eq[1] !== CURRENT_MEMBER_TOKEN
+      ) {
+        throw new OnemaAccessException(
+          `Onema access rules fill "${objectName}.${fieldName}" for role "${roleKey}", whose rule is not "${fieldName} is $me"`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+    }
+  }
 };
 
 // rls-design §12а Т-1: a protected field is one only our application writes, so
@@ -78,6 +114,18 @@ const validateFreezeRules = (rules: OnemaAccessRules): void => {
       if (new Set(freezeRule.fields).size !== freezeRule.fields.length) {
         throw new OnemaAccessException(
           `Onema access rules freeze a field of "${objectName}" twice in one rule on "${freezeRule.field}"`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
+      }
+
+      // The latch already freezes the condition field, so naming it again is
+      // the same slip as any other repetition
+      if (
+        freezeRule.isIrreversible &&
+        freezeRule.fields.includes(freezeRule.field)
+      ) {
+        throw new OnemaAccessException(
+          `Onema access rules freeze the condition field "${objectName}.${freezeRule.field}" twice: "isIrreversible" already does it`,
           OnemaAccessExceptionCode.INVALID_RULES,
         );
       }

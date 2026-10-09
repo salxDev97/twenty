@@ -97,7 +97,14 @@ const assertFreezeRuleHolds = ({
     return;
   }
 
-  for (const fieldName of freezeRule.fields) {
+  // A latch freezes the condition field along with the rest: otherwise the
+  // state it names is left on one write and re-entered on the next, and every
+  // comparison in between reads a condition that no longer holds
+  const frozenFieldNames = freezeRule.isIrreversible
+    ? [freezeRule.field, ...freezeRule.fields]
+    : freezeRule.fields;
+
+  for (const fieldName of frozenFieldNames) {
     for (const columnName of resolveFrozenColumnNames({
       tableShape,
       fieldName,

@@ -96,8 +96,13 @@
       {
         "field": "onemaStage",
         "equals": "DEAL",
-        "fields": ["company", "onemaContractFiles", "onemaContractSignedAt"]
+        "fields": ["company", "onemaContractFiles", "onemaContractSignedAt"],
+        "isIrreversible": true
       }
     ]
+  },
+  "ownerDefaults": {
+    "opportunity": { "sales": "owner" },
+    "project": { "sales": "salesOwner", "projectManager": "projectManager" }
   }
 }

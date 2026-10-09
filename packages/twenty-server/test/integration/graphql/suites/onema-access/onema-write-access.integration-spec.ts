@@ -107,6 +107,7 @@ describe('onemaWriteAccess', () => {
   const companyOwnedByMeRules = (): OnemaAccessRules => ({
     roles: { member: memberRoleUniversalIdentifier },
     objects: { company: { member: { eq: ['accountOwner', '$me'] } } },
+    ownerDefaults: { company: { member: 'accountOwner' } },
   });
 
   const personFollowsItsCompanyRules = (): OnemaAccessRules => ({

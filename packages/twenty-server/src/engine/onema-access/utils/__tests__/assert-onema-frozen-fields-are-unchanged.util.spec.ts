@@ -166,6 +166,87 @@ describe('assertOnemaFrozenFieldsAreUnchanged', () => {
     ).toThrow(/opportunity\.company/);
   });
 
+  // В1, three steps on one record: the stage may be reached, never left, and
+  // what the lead entered "Сделка" with stays put. Without the latch the whole
+  // freeze is a speed bump — step 2 clears the condition and step 3 walks in.
+  describe('a stage declared irreversible', () => {
+    const dealIsIrreversibleRules: OnemaAccessRules = {
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { opportunity: { sales: { all: true } } },
+      freezeWhen: {
+        opportunity: [
+          {
+            field: 'onemaStage',
+            equals: 'DEAL',
+            fields: ['company', 'onemaContractFiles'],
+            isIrreversible: true,
+          },
+        ],
+      },
+    };
+
+    it('step 1: lets the record reach the stage, company and all', () => {
+      setOnemaAccessRulesForTesting(dealIsIrreversibleRules);
+
+      expect(() =>
+        assertUnchanged({
+          updates: [
+            {
+              rawRecordBefore: { ...dealBefore, onemaStage: 'PROPOSAL' },
+              setColumns: { onemaStage: 'DEAL', companyId: 'company-2' },
+            },
+          ],
+        }),
+      ).not.toThrow();
+    });
+
+    it('step 2: refuses leaving the stage', () => {
+      setOnemaAccessRulesForTesting(dealIsIrreversibleRules);
+
+      expect(() =>
+        assertUnchanged({
+          updates: [
+            {
+              rawRecordBefore: dealBefore,
+              setColumns: { onemaStage: 'PROPOSAL' },
+            },
+          ],
+        }),
+      ).toThrow(/"opportunity\.onemaStage" is frozen/);
+    });
+
+    it('step 3: refuses the company swap the detour was for', () => {
+      setOnemaAccessRulesForTesting(dealIsIrreversibleRules);
+
+      expect(() =>
+        assertUnchanged({
+          updates: [
+            {
+              rawRecordBefore: dealBefore,
+              setColumns: { companyId: 'company-2' },
+            },
+          ],
+        }),
+      ).toThrow(/opportunity\.company/);
+    });
+
+    // Without the latch step 2 goes through, and that is the hole
+    it('lets the stage be left while the rule carries no latch', () => {
+      setOnemaAccessRulesForTesting(dealIsFinalRules);
+
+      expect(() =>
+        assertUnchanged({
+          updates: [
+            {
+              rawRecordBefore: dealBefore,
+              setColumns: { onemaStage: 'PROPOSAL' },
+            },
+          ],
+        }),
+      ).not.toThrow();
+    });
+  });
+
   it('refuses every write while the rules file is unusable', () => {
     setOnemaAccessRulesForTesting({
       roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },

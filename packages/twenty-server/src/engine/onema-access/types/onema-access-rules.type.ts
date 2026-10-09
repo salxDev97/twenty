@@ -31,6 +31,11 @@ export type OnemaFreezeRule = {
   field: string;
   equals: OnemaConditionValue;
   fields: string[];
+  // A latch: the condition field freezes itself too, so the state it names is
+  // never left. Without it a freeze is only a speed bump — "Сделка" → другая
+  // стадия → подмена компании → обратно в "Сделку" clears the condition on the
+  // middle write and nothing of the rule ever sees it (rls-design §12а Т-2)
+  isIrreversible?: boolean;
 };
 
 // rls-design §12а Т-1: fields the product logic rests on. Keyed by object and
@@ -40,6 +45,12 @@ export type OnemaWriteProtectedFields = Record<
   string,
   Record<string, OnemaRoleKey[]>
 >;
+
+// rls-design §3.3 point №5: which relation holds "the owner" of an object, per
+// role, spelled out. Reading it off any `eq [field, '$me']` instead would fill
+// `assignee`, `projectManager` or whatever service field is written like that
+// next, silently and with the current participant.
+export type OnemaOwnerDefaults = Record<string, Record<OnemaRoleKey, string>>;
 
 export type OnemaAccessRules = {
   // Role key of the rules file to the universalIdentifier of the Twenty role:
@@ -57,6 +68,7 @@ export type OnemaAccessRules = {
   // would read exactly like a deliberate "nothing is protected"
   writeProtectedFields?: OnemaWriteProtectedFields;
   freezeWhen?: Record<string, OnemaFreezeRule[]>;
+  ownerDefaults?: OnemaOwnerDefaults;
 };
 
 export type OnemaAccessSubject = {

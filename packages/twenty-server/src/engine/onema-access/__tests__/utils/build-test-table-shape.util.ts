@@ -7,12 +7,16 @@ export const buildTestTableShape = ({
   nameSingular,
   columnNames = [],
   joinColumnNameByFieldName = {},
+  relationTargetByFieldName = {},
   compositeParentFieldNameByColumnName = {},
   hasDeletedAtColumn = true,
 }: {
   nameSingular: string;
   columnNames?: string[];
   joinColumnNameByFieldName?: Record<string, string>;
+  // Which object a relation points at, when it is not the one the field is
+  // named after — `accountOwner` points at `workspaceMember`
+  relationTargetByFieldName?: Record<string, string>;
   // A composite field is several columns, each naming the field it belongs to
   compositeParentFieldNameByColumnName?: Record<string, string>;
   hasDeletedAtColumn?: boolean;
@@ -52,7 +56,9 @@ export const buildTestTableShape = ({
             fieldName,
             fieldMetadataId: `field-metadata-id-${nameSingular}-${fieldName}`,
             relationType: RelationType.MANY_TO_ONE,
-            targetObjectMetadataId: `object-metadata-id-${fieldName}`,
+            targetObjectMetadataId: `object-metadata-id-${
+              relationTargetByFieldName[fieldName] ?? fieldName
+            }`,
             targetFieldMetadataId: null,
             joinColumnName,
           },

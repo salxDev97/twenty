@@ -7,9 +7,13 @@ import { validateOnemaAccessRulesAgainstMetadata } from 'src/engine/onema-access
 
 const SALES_ROLE_UNIVERSAL_IDENTIFIER = 'onema-sales';
 
+const workspaceMemberTableShape = buildTestTableShape({
+  nameSingular: 'workspaceMember',
+});
 const projectTableShape = buildTestTableShape({
   nameSingular: 'project',
   joinColumnNameByFieldName: { projectManager: 'projectManagerId' },
+  relationTargetByFieldName: { projectManager: 'workspaceMember' },
 });
 const projectMemberTableShape = buildTestTableShape({
   nameSingular: 'projectMember',
@@ -25,6 +29,7 @@ const { objectIdByNameSingular, tableShapeByObjectMetadataId } =
     projectTableShape,
     projectMemberTableShape,
     taskTableShape,
+    workspaceMemberTableShape,
   ]);
 
 const metadata = {
@@ -202,6 +207,34 @@ describe('validateOnemaAccessRulesAgainstMetadata', () => {
     expect(
       validation.kind === 'invalid' && validation.problems.join('; '),
     ).toMatch(/writeProtectedFields: "onemaApprovalDecison" is no field/);
+  });
+
+  it('accepts an owner default on a relation to workspaceMember', () => {
+    expect(
+      validate({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { project: { sales: { eq: ['projectManager', '$me'] } } },
+        ownerDefaults: { project: { sales: 'projectManager' } },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  // The substituted value is a workspaceMember id, so a default on a relation
+  // to anything else writes an id of the wrong object and the rule reading it
+  // then matches nothing at all
+  it('rejects an owner default on a relation that is not a workspaceMember', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { task: { sales: { eq: ['project', '$me'] } } },
+      ownerDefaults: { task: { sales: 'project' } },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(
+      /ownerDefaults: "project" of "task" points at another object than "workspaceMember"/,
+    );
   });
 
   it('rejects a freeze rule naming a field this workspace does not have', () => {

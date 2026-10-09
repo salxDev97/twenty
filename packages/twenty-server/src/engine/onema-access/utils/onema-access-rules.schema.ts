@@ -37,6 +37,9 @@ const onemaFreezeRuleSchema = z.strictObject({
   field: z.string().min(1),
   equals: onemaConditionValueSchema,
   fields: z.array(z.string().min(1)).min(1),
+  // Absent means "the condition may still be cleared", which is the weaker of
+  // the two and has to be the one spelled out by silence
+  isIrreversible: z.boolean().optional(),
 });
 
 export const onemaAccessRulesSchema = z.strictObject({
@@ -68,4 +71,11 @@ export const onemaAccessRulesSchema = z.strictObject({
     z.string().min(1),
     z.array(onemaFreezeRuleSchema).min(1),
   ),
+  // Object -> role key -> the relation that holds the owner. Optional, unlike
+  // the keys above, because forgetting it hides nothing: a record created
+  // without its owner is refused by the check after the write, loudly, where a
+  // forgotten writeProtectedFields would quietly protect nothing at all
+  ownerDefaults: z
+    .record(z.string().min(1), z.record(z.string().min(1), z.string().min(1)))
+    .optional(),
 });

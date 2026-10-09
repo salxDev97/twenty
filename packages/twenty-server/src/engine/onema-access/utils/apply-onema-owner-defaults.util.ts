@@ -1,9 +1,6 @@
 import { isDefined } from 'twenty-shared/utils';
 
-import {
-  type OnemaCondition,
-  type OnemaRoleKey,
-} from 'src/engine/onema-access/types/onema-access-rules.type';
+import { type OnemaRoleKey } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
 import { resolveOnemaFieldColumnNames } from 'src/engine/onema-access/utils/resolve-onema-field-columns.util';
 import {
@@ -11,13 +8,12 @@ import {
   resolveOnemaAccess,
 } from 'src/engine/onema-access/utils/resolve-onema-access.util';
 
-const CURRENT_MEMBER_TOKEN = '$me';
-
 // rls-design §3.3, point №5. A sales role may read its own lead but not write
 // the owner field, so a lead it creates would be born with an empty owner and
 // become invisible to its own author — and the check after the write would
-// refuse the creation outright. The owner is filled in from the rule itself, so
-// the rules file stays the single place that says who owns what.
+// refuse the creation outright. Which field that is, is read from the explicit
+// `ownerDefaults` key, so the rules file stays the single place that says who
+// owns what, and no field becomes an owner by looking like one.
 //
 // Returns undefined when nothing was substituted, which lets the caller keep the
 // rows it has already built instead of building them twice.
@@ -52,8 +48,8 @@ export const applyOnemaOwnerDefaults = <
   }
 
   const ownerFieldName = resolveOwnerFieldName({
-    conditionByRoleKey:
-      resolution.rules.objects[scope.tableShape.nameSingular] ?? {},
+    fieldNameByRoleKey:
+      resolution.rules.ownerDefaults?.[scope.tableShape.nameSingular] ?? {},
     roleKeys: resolution.compilationContext.roleKeys,
   });
 
@@ -91,31 +87,20 @@ export const applyOnemaOwnerDefaults = <
   return hasSubstituted ? recordsWithOwner : undefined;
 };
 
-// Only an unambiguous "mine and nothing else" earns a default. A role that may
-// see every record of the object needs no owner to see what it creates, and
-// substituting one would hand out ownership nobody asked for; two roles naming
-// two different owner fields have no single answer at all.
+// A role the file says nothing about contributes nothing: holding `all` on top
+// of a sales role no longer makes the default disappear, because only the roles
+// the file names for this object are read at all. Two named roles pointing at
+// two different owner fields still have no single answer, and silence is the
+// safe one — the check after the write then refuses the creation loudly.
 const resolveOwnerFieldName = ({
-  conditionByRoleKey,
+  fieldNameByRoleKey,
   roleKeys,
 }: {
-  conditionByRoleKey: Partial<Record<OnemaRoleKey, OnemaCondition>>;
+  fieldNameByRoleKey: Record<OnemaRoleKey, string>;
   roleKeys: string[];
 }): string | undefined => {
-  const conditions = roleKeys
-    .map((roleKey) => conditionByRoleKey[roleKey])
-    .filter(isDefined);
-
-  if (conditions.length === 0) {
-    return undefined;
-  }
-
   const ownerFieldNames = new Set(
-    conditions.map((condition) =>
-      'eq' in condition && condition.eq[1] === CURRENT_MEMBER_TOKEN
-        ? condition.eq[0]
-        : undefined,
-    ),
+    roleKeys.map((roleKey) => fieldNameByRoleKey[roleKey]).filter(isDefined),
   );
 
   if (ownerFieldNames.size !== 1) {

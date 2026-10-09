@@ -307,6 +307,9 @@ describe('getOnemaAccessRulesState', () => {
 
     const state = getOnemaAccessRulesState();
 
+    // "loaded" asserted on its own: a `failed` state would make every `&&`
+    // below short-circuit to false, which `toBeDefined` happily accepts
+    expect(state.kind).toBe('loaded');
     expect(
       state.kind === 'loaded' && state.rules.objects.opportunity,
     ).toBeDefined();

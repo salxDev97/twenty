@@ -390,6 +390,47 @@ describe('parseOnemaAccessRules', () => {
     ).toThrow(/without declaring its role id/);
   });
 
+  it('accepts an owner default on the role whose rule reads that very field', () => {
+    const rules = {
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      freezeWhen: {},
+      objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
+      ownerDefaults: { opportunity: { sales: 'owner' } },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  // С1: filling a field no rule reads as "mine" hands out ownership the file
+  // never asked for — `assignee` and `projectManager` are written like owners
+  it('rejects an owner default on a field the rule of that role does not read', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {},
+        objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
+        ownerDefaults: { opportunity: { sales: 'assignee' } },
+      }),
+    ).toThrow(/whose rule is not "assignee is \$me"/);
+  });
+
+  it('rejects an owner default for a role nobody declared', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {},
+        objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
+        ownerDefaults: { opportunity: { ceo: 'owner' } },
+      }),
+    ).toThrow(/without declaring its role id/);
+  });
+
   it('rejects an object listed under freezeWhen with no rule', () => {
     expect(() =>
       parseOnemaAccessRules({
@@ -400,6 +441,27 @@ describe('parseOnemaAccessRules', () => {
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/freezeWhen/);
+  });
+
+  it('rejects a latch that also names its own condition field', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        freezeWhen: {
+          opportunity: [
+            {
+              field: 'onemaStage',
+              equals: 'DEAL',
+              fields: ['company', 'onemaStage'],
+              isIrreversible: true,
+            },
+          ],
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/"isIrreversible" already does it/);
   });
 
   it('rejects a freeze rule naming one field twice', () => {

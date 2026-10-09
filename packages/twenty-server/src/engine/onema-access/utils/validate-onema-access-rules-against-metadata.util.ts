@@ -12,6 +12,8 @@ import { type WorkspaceTableShape } from 'src/engine/twenty-orm/table-shape/type
 
 const logger = new Logger(ONEMA_ACCESS_LOGGER_CONTEXT);
 
+const WORKSPACE_MEMBER_OBJECT_NAME = 'workspaceMember';
+
 export type OnemaRulesValidation =
   | { kind: 'valid' }
   | { kind: 'invalid'; problems: string[] };
@@ -140,8 +142,59 @@ const collectProblems = ({
 
   collectWriteProtectedFieldProblems({ rules, metadata, problems });
   collectFreezeRuleProblems({ rules, metadata, problems });
+  collectOwnerDefaultProblems({ rules, metadata, problems });
 
   return problems;
+};
+
+// The substituted value is a workspaceMember id, so a default on anything but a
+// relation to workspaceMember would write an id of the wrong object into the
+// column — and the rule reading it would then quietly match nothing
+const collectOwnerDefaultProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  const workspaceMemberTableShape = resolveTableShape({
+    objectName: WORKSPACE_MEMBER_OBJECT_NAME,
+    metadata,
+  });
+
+  for (const [objectName, fieldNameByRoleKey] of Object.entries(
+    rules.ownerDefaults ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `ownerDefaults names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    if (!isDefined(workspaceMemberTableShape)) {
+      problems.push(
+        `ownerDefaults needs "${WORKSPACE_MEMBER_OBJECT_NAME}", which this workspace does not have`,
+      );
+
+      return;
+    }
+
+    for (const fieldName of Object.values(fieldNameByRoleKey)) {
+      collectRelationProblems({
+        ownerTableShape: tableShape,
+        fieldName,
+        expectedTargetTableShape: workspaceMemberTableShape,
+        describe: (problem) => `ownerDefaults: ${problem}`,
+        problems,
+      });
+    }
+  }
 };
 
 // A protected or frozen field named with a typo protects nothing, which is the

@@ -32,6 +32,15 @@ export const apiKeyAuthContext = {
   apiKey: { id: API_KEY_ID },
 } as unknown as WorkspaceAuthContext;
 
+// A person acting through an application holds both roles at once, which is how
+// "sales" and a role seeing everything end up on one subject
+export const multiRoleAuthContext = {
+  type: 'user',
+  workspaceMemberId: WORKSPACE_MEMBER_ID,
+  userWorkspaceId: USER_WORKSPACE_ID,
+  application: { defaultRoleId: CEO_ROLE_ID },
+} as unknown as WorkspaceAuthContext;
+
 export const ceoApiKeyAuthContext = {
   type: 'apiKey',
   apiKey: { id: CEO_API_KEY_ID },
