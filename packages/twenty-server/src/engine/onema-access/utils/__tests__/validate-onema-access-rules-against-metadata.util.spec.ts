@@ -209,6 +209,36 @@ describe('validateOnemaAccessRulesAgainstMetadata', () => {
     ).toMatch(/writeProtectedFields: "onemaApprovalDecison" is no field/);
   });
 
+  it('accepts a write-parent link whose foreign key points at that object', () => {
+    expect(
+      validate({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { project: { sales: { all: true } } },
+        writeRequiresParentAccess: {
+          projectMember: [{ foreignKey: 'project', object: 'project' }],
+        },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  // A mistyped foreign key here leaves the access-granting link wide open
+  it('rejects a write-parent link whose foreign key points somewhere else', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+      writeRequiresParentAccess: {
+        projectMember: [{ foreignKey: 'member', object: 'project' }],
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(
+      /writeRequiresParentAccess: "member" of "projectMember" points at another object than "project"/,
+    );
+  });
+
   it('accepts an owner default on a relation to workspaceMember', () => {
     expect(
       validate({

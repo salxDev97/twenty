@@ -101,6 +101,12 @@
       }
     ]
   },
+  "writeRequiresParentAccess": {
+    "projectMember": [{ "foreignKey": "project", "object": "project" }],
+    "clientAccess": [{ "foreignKey": "project", "object": "project" }],
+    "task": [{ "foreignKey": "project", "object": "project" }],
+    "dataRoomItem": [{ "foreignKey": "project", "object": "project" }]
+  },
   "ownerDefaults": {
     "opportunity": { "sales": "owner" },
     "project": { "sales": "salesOwner", "projectManager": "projectManager" }

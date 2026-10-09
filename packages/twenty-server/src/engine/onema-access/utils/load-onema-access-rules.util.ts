@@ -221,6 +221,7 @@ export const setOnemaAccessRulesForTesting = (
         requiredObjects: rules.requiredObjects ?? [],
         writeProtectedFields: rules.writeProtectedFields ?? {},
         freezeWhen: rules.freezeWhen ?? {},
+        writeRequiresParentAccess: rules.writeRequiresParentAccess ?? {},
       }),
       { mode: 0o600 },
     );

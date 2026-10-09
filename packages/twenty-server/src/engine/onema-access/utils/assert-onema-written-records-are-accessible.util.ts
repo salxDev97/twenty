@@ -1,11 +1,16 @@
 import { isNonEmptyString } from '@sniptt/guards';
+import { isDefined } from 'twenty-shared/utils';
 
 import {
   ONEMA_PARAMETER_PREFIX,
   ONEMA_RECORD_ID_BATCH_SIZE,
 } from 'src/engine/onema-access/constants/onema-access.constants';
+import { type OnemaRowAccess } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { chunkOnemaRecordIds } from 'src/engine/onema-access/utils/chunk-onema-record-ids.util';
-import { compileOnemaRowAccess } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
+import {
+  compileOnemaRowAccess,
+  compileOnemaWriteParentAccess,
+} from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
 import {
   type OnemaAccessScope,
@@ -92,20 +97,81 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
   }
 
   const tableAlias = scope.tableShape.nameSingular;
-  const rowAccess = compileOnemaRowAccess({
-    tableShape: scope.tableShape,
+
+  await assertRecordIdsAreAdmitted({
+    scope,
     tableAlias,
-    context: resolution.compilationContext,
+    recordIds,
+    executeRaw,
+    rowAccess: compileOnemaRowAccess({
+      tableShape: scope.tableShape,
+      tableAlias,
+      context: resolution.compilationContext,
+    }),
+    describeDenial: () =>
+      `the role may see no record of "${scope.tableShape.nameSingular}"`,
+    describeRefusal: (refusedRecordIds) =>
+      `the written "${scope.tableShape.nameSingular}" record(s) ${refusedRecordIds.join(
+        ', ',
+      )} would not be visible to their author`,
   });
 
+  const parents =
+    resolution.rules.writeRequiresParentAccess?.[
+      scope.tableShape.nameSingular
+    ];
+
+  if (!isDefined(parents)) {
+    return;
+  }
+
+  // Б5. A second pass rather than one condition ANDed with the first: the two
+  // refusals are different mistakes — "you put the record where you cannot see
+  // it" and "you hung it on somebody else's record" — and the second is the one
+  // nothing else in the rules can catch
+  await assertRecordIdsAreAdmitted({
+    scope,
+    tableAlias,
+    recordIds,
+    executeRaw,
+    rowAccess: compileOnemaWriteParentAccess({
+      tableShape: scope.tableShape,
+      tableAlias,
+      parents,
+      context: resolution.compilationContext,
+    }),
+    describeDenial: () =>
+      `the role may attach no record of "${scope.tableShape.nameSingular}" to anything it can see`,
+    describeRefusal: (refusedRecordIds) =>
+      `the written "${scope.tableShape.nameSingular}" record(s) ${refusedRecordIds.join(
+        ', ',
+      )} hang on a record their author may not see`,
+  });
+};
+
+const assertRecordIdsAreAdmitted = async ({
+  scope,
+  tableAlias,
+  recordIds,
+  rowAccess,
+  executeRaw,
+  describeDenial,
+  describeRefusal,
+}: {
+  scope: OnemaAccessScope;
+  tableAlias: string;
+  recordIds: string[];
+  rowAccess: OnemaRowAccess;
+  executeRaw: OnemaRawQueryExecutor;
+  describeDenial: () => string;
+  describeRefusal: (refusedRecordIds: string[]) => string;
+}): Promise<void> => {
   if (rowAccess.kind === 'open') {
     return;
   }
 
   if (rowAccess.kind === 'denied') {
-    throw onemaWriteDenied(
-      `the role may see no record of "${scope.tableShape.nameSingular}"`,
-    );
+    throw onemaWriteDenied(describeDenial());
   }
 
   const admittedRecordIds = new Set<string>();
@@ -139,10 +205,6 @@ export const assertOnemaWrittenRecordsAreAccessible = async ({
   );
 
   if (refusedRecordIds.length > 0) {
-    throw onemaWriteDenied(
-      `the written "${scope.tableShape.nameSingular}" record(s) ${refusedRecordIds.join(
-        ', ',
-      )} would not be visible to their author`,
-    );
+    throw onemaWriteDenied(describeRefusal(refusedRecordIds));
   }
 };

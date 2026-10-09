@@ -224,6 +224,82 @@ describe('assertOnemaWrittenRecordsAreAccessible', () => {
     expect(executeRaw).toHaveBeenCalledTimes(2);
   });
 
+  // Б5, the other side of the link. A membership row is trivially visible to
+  // whoever just created it, so its own rule says nothing about whose project it
+  // joins — and creating one hands its holder everything that project carries.
+  describe('a record whose link grants access to its parent', () => {
+    const projectMemberTableShape = buildTestTableShape({
+      nameSingular: 'projectMember',
+      joinColumnNameByFieldName: {
+        project: 'projectId',
+        member: 'memberId',
+      },
+      relationTargetByFieldName: { project: 'project' },
+    });
+
+    // No rule for projectMember at all, which is the realistic case: it is not
+    // an object anybody browses, only one that grants access to another
+    const membershipGrantsProjectRules: OnemaAccessRules = {
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { eq: ['projectManager', '$me'] } } },
+      writeRequiresParentAccess: {
+        projectMember: [{ foreignKey: 'project', object: 'project' }],
+      },
+    };
+
+    const assertMembershipAccessible = (
+      executeRaw: ReturnType<typeof buildExecuteRaw>,
+    ) =>
+      assertOnemaWrittenRecordsAreAccessible({
+        scope: buildTestAccessScope({
+          tableShape: projectMemberTableShape,
+          tableShapes: [projectMemberTableShape, projectTableShape],
+        }),
+        writtenRecords: [{ id: 'membership-1' }],
+        returningColumns: ['id'],
+        mutationKind: 'insert',
+        executeRaw,
+      });
+
+    it('refuses a membership created in a project its author may not see', async () => {
+      setOnemaAccessRulesForTesting(membershipGrantsProjectRules);
+
+      await expect(
+        assertMembershipAccessible(buildExecuteRaw([])),
+      ).rejects.toThrow(
+        /membership-1 hang on a record their author may not see/,
+      );
+    });
+
+    it('accepts a membership created in a project its author manages', async () => {
+      setOnemaAccessRulesForTesting(membershipGrantsProjectRules);
+
+      const executeRaw = buildExecuteRaw(['membership-1']);
+
+      await assertMembershipAccessible(executeRaw);
+
+      const [sql] = executeRaw.mock.calls[0] as unknown as [string];
+
+      expect(sql).toContain('"projectMember"."projectId" IS NULL OR');
+      expect(sql).toContain('FROM "workspace_test"."_project"');
+    });
+
+    // Without the key the membership passes on its own rule alone, which is
+    // exactly the hole: the parent is never looked at
+    it('asks nothing about the parent while the file names no link', async () => {
+      setOnemaAccessRulesForTesting({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { project: { sales: { eq: ['projectManager', '$me'] } } },
+      });
+
+      const executeRaw = buildExecuteRaw([]);
+
+      await assertMembershipAccessible(executeRaw);
+
+      expect(executeRaw).not.toHaveBeenCalled();
+    });
+  });
+
   it('refuses every write while the rules file is unusable', async () => {
     setOnemaAccessRulesForTesting({
       roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },

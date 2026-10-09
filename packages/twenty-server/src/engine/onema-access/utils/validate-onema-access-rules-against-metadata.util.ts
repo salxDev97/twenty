@@ -143,8 +143,58 @@ const collectProblems = ({
   collectWriteProtectedFieldProblems({ rules, metadata, problems });
   collectFreezeRuleProblems({ rules, metadata, problems });
   collectOwnerDefaultProblems({ rules, metadata, problems });
+  collectWriteParentProblems({ rules, metadata, problems });
 
   return problems;
+};
+
+// A mistyped foreign key here leaves the access-granting link wide open, which
+// is the same silence as a mistyped protected field one level up (Б5)
+const collectWriteParentProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  for (const [objectName, parents] of Object.entries(
+    rules.writeRequiresParentAccess ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `writeRequiresParentAccess names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    for (const parent of parents) {
+      const parentTableShape = resolveTableShape({
+        objectName: parent.object,
+        metadata,
+      });
+
+      if (!isDefined(parentTableShape)) {
+        problems.push(
+          `writeRequiresParentAccess: "${parent.object}" is not an object of this workspace`,
+        );
+
+        continue;
+      }
+
+      collectRelationProblems({
+        ownerTableShape: tableShape,
+        fieldName: parent.foreignKey,
+        expectedTargetTableShape: parentTableShape,
+        describe: (problem) => `writeRequiresParentAccess: ${problem}`,
+        problems,
+      });
+    }
+  }
 };
 
 // The substituted value is a workspaceMember id, so a default on anything but a

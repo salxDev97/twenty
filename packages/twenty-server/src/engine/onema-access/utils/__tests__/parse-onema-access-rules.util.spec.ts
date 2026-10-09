@@ -13,6 +13,7 @@ describe('parseOnemaAccessRules', () => {
       },
       requiredObjects: ['opportunity', 'task'],
       writeProtectedFields: {},
+      writeRequiresParentAccess: {},
       freezeWhen: {},
       objects: {
         opportunity: {
@@ -50,6 +51,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { opportunity: { sales: { anyParent: { fks: ['leadId'] } } } },
       }),
@@ -71,6 +73,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: ['opportunity', 'project'],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -83,6 +86,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: ['project'],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { project: {} },
       }),
@@ -95,6 +99,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { project: {} },
       }),
@@ -110,6 +115,7 @@ describe('parseOnemaAccessRules', () => {
         },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           opportunity: { ceo: { all: true }, sales: { eq: ['owner', '$me'] } },
@@ -124,6 +130,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { opportunity: { projectManager: { all: true } } },
       }),
@@ -136,6 +143,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           project: {
@@ -160,6 +168,7 @@ describe('parseOnemaAccessRules', () => {
         },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           project: {
@@ -181,6 +190,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           dataRoomItem: {
@@ -210,6 +220,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           project: {
@@ -243,6 +254,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           dataRoomItem: {
@@ -270,6 +282,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           project: {
@@ -294,6 +307,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           opportunity: {
@@ -314,6 +328,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: {
           dataRoomItem: {
@@ -342,6 +357,7 @@ describe('parseOnemaAccessRules', () => {
       writeProtectedFields: {
         opportunity: { onemaPaymentConfirmation: [], orgRole: ['ceo'] },
       },
+      writeRequiresParentAccess: {},
       freezeWhen: {
         opportunity: [
           { field: 'onemaStage', equals: 'DEAL', fields: ['company'] },
@@ -371,6 +387,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: { opportunity: { onemaPaymentConfirmation: [] } },
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -384,6 +401,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: { opportunity: { orgRole: ['ceo'] } },
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -395,6 +413,7 @@ describe('parseOnemaAccessRules', () => {
       roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
       requiredObjects: [],
       writeProtectedFields: {},
+      writeRequiresParentAccess: {},
       freezeWhen: {},
       objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
       ownerDefaults: { opportunity: { sales: 'owner' } },
@@ -411,6 +430,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
         ownerDefaults: { opportunity: { sales: 'assignee' } },
@@ -424,6 +444,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
         objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
         ownerDefaults: { opportunity: { ceo: 'owner' } },
@@ -437,6 +458,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: { opportunity: [] },
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -449,6 +471,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {
           opportunity: [
             {
@@ -470,6 +493,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {
           opportunity: [
             {

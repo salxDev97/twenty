@@ -25,6 +25,7 @@ const validRules: OnemaAccessRules = {
   requiredObjects: [],
   objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
   writeProtectedFields: {},
+  writeRequiresParentAccess: {},
   freezeWhen: {},
 };
 
@@ -72,6 +73,7 @@ describe('getOnemaAccessRulesState', () => {
         ...rules,
         requiredObjects: rules.requiredObjects ?? [],
         writeProtectedFields: rules.writeProtectedFields ?? {},
+        writeRequiresParentAccess: rules.writeRequiresParentAccess ?? {},
         freezeWhen: rules.freezeWhen ?? {},
       }),
     );
@@ -126,6 +128,7 @@ describe('getOnemaAccessRulesState', () => {
         requiredObjects: [],
         objects: { opportunity: {} },
         writeProtectedFields: {},
+        writeRequiresParentAccess: {},
         freezeWhen: {},
       }),
     );

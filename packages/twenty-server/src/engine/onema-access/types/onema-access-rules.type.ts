@@ -52,6 +52,16 @@ export type OnemaWriteProtectedFields = Record<
 // next, silently and with the current participant.
 export type OnemaOwnerDefaults = Record<string, Record<OnemaRoleKey, string>>;
 
+// rls-design §5, the other side of every `exists` and `parent` link. Access to a
+// project is granted by a row of `projectMember`, and that row is not itself a
+// project: the check after the write asks whether the membership is visible to
+// its author, which it trivially is, and never asks whose project it joins.
+// Naming the link here makes writing the child a write on the parent too.
+export type OnemaWriteRequiresParentAccess = Record<
+  string,
+  OnemaParentCondition[]
+>;
+
 export type OnemaAccessRules = {
   // Role key of the rules file to the universalIdentifier of the Twenty role:
   // stable across reinstalls and renames, unlike a role id or a UI label
@@ -68,6 +78,10 @@ export type OnemaAccessRules = {
   // would read exactly like a deliberate "nothing is protected"
   writeProtectedFields?: OnemaWriteProtectedFields;
   freezeWhen?: Record<string, OnemaFreezeRule[]>;
+  // Mandatory in a file for the same reason as writeProtectedFields: a forgotten
+  // key leaves every access-granting link open, and reads exactly like a
+  // deliberate "no link grants anybody access"
+  writeRequiresParentAccess?: OnemaWriteRequiresParentAccess;
   ownerDefaults?: OnemaOwnerDefaults;
 };
 

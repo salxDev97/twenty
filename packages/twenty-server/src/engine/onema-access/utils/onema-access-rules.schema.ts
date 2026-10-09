@@ -71,6 +71,19 @@ export const onemaAccessRulesSchema = z.strictObject({
     z.string().min(1),
     z.array(onemaFreezeRuleSchema).min(1),
   ),
+  // Mandatory and `{}` for "no link grants access", for the same reason as
+  // writeProtectedFields: a forgotten key leaves every one of them open
+  writeRequiresParentAccess: z.record(
+    z.string().min(1),
+    z
+      .array(
+        z.strictObject({
+          foreignKey: z.string().min(1),
+          object: z.string().min(1),
+        }),
+      )
+      .min(1),
+  ),
   // Object -> role key -> the relation that holds the owner. Optional, unlike
   // the keys above, because forgetting it hides nothing: a record created
   // without its owner is refused by the check after the write, loudly, where a
