@@ -692,7 +692,7 @@ describe('compileOnemaRowAccess', () => {
   // object more than a plain chain does. The contrast is the whole point: the
   // same four objects reached by a plain parent are still refused.
   it('lets a chain through a polymorphic target reach one object further', () => {
-    const rules = {
+    const rules: OnemaAccessRules = {
       roles: baseRoles,
       objects: {
         opportunity: { sales: { eq: ['owner', '$me'] } },
