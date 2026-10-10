@@ -405,6 +405,16 @@
       { "foreignKey": "opportunity", "object": "opportunity" }
     ]
   },
+  "writeFrozenByParent": {
+    "onemaApprovalDecisionRecord": [
+      {
+        "foreignKey": "opportunity",
+        "object": "opportunity",
+        "field": "onemaStage",
+        "equals": "DEAL"
+      }
+    ]
+  },
   "transitions": {
     "onemaEstimate": {
       "field": "status",

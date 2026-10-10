@@ -146,6 +146,7 @@ const collectProblems = ({
   collectTransitionRuleProblems({ rules, metadata, problems });
   collectOwnerDefaultProblems({ rules, metadata, problems });
   collectWriteParentProblems({ rules, metadata, problems });
+  collectWriteFrozenByParentProblems({ rules, metadata, problems });
 
   return problems;
 };
@@ -195,6 +196,68 @@ const collectWriteParentProblems = ({
         describe: (problem) => `writeRequiresParentAccess: ${problem}`,
         problems,
       });
+    }
+  }
+};
+
+// ONE-115: the foreign key has to point at the named parent, and the field read
+// off that parent has to be a single stored column — the same two mistakes
+// collectWriteParentProblems and collectFreezeRuleProblems each already guard
+// against one hop apart
+const collectWriteFrozenByParentProblems = ({
+  rules,
+  metadata,
+  problems,
+}: {
+  rules: OnemaAccessRules;
+  metadata: MetadataView;
+  problems: string[];
+}): void => {
+  for (const [objectName, frozenByParentRules] of Object.entries(
+    rules.writeFrozenByParent ?? {},
+  )) {
+    const tableShape = resolveTableShape({ objectName, metadata });
+
+    if (!isDefined(tableShape)) {
+      problems.push(
+        `writeFrozenByParent names no object of this workspace ("${objectName}")`,
+      );
+
+      continue;
+    }
+
+    for (const rule of frozenByParentRules) {
+      const parentTableShape = resolveTableShape({
+        objectName: rule.object,
+        metadata,
+      });
+
+      if (!isDefined(parentTableShape)) {
+        problems.push(
+          `writeFrozenByParent: "${rule.object}" is not an object of this workspace`,
+        );
+
+        continue;
+      }
+
+      collectRelationProblems({
+        ownerTableShape: tableShape,
+        fieldName: rule.foreignKey,
+        expectedTargetTableShape: parentTableShape,
+        describe: (problem) => `writeFrozenByParent: ${problem}`,
+        problems,
+      });
+
+      if (
+        resolveOnemaFieldColumnNames({
+          tableShape: parentTableShape,
+          fieldName: rule.field,
+        }).length !== 1
+      ) {
+        problems.push(
+          `writeFrozenByParent: "${rule.field}" is no single-column field of "${rule.object}"`,
+        );
+      }
     }
   }
 };

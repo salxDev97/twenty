@@ -30,6 +30,7 @@ import { assertOnemaRawSqlIsPermitted } from 'src/engine/onema-access/utils/asse
 import { assertOnemaFrozenFieldsAreUnchanged } from 'src/engine/onema-access/utils/assert-onema-frozen-fields-are-unchanged.util';
 import { assertOnemaProtectedFieldsAreWritable } from 'src/engine/onema-access/utils/assert-onema-protected-fields-are-writable.util';
 import { assertOnemaTransitionIsPermitted } from 'src/engine/onema-access/utils/assert-onema-transition-is-permitted.util';
+import { assertOnemaWriteIsPermittedByParentState } from 'src/engine/onema-access/utils/assert-onema-write-is-permitted-by-parent-state.util';
 import { assertOnemaWrittenRecordsAreAccessible } from 'src/engine/onema-access/utils/assert-onema-written-records-are-accessible.util';
 import { lockOnemaGuardedRecordsForUpdate } from 'src/engine/onema-access/utils/lock-onema-guarded-records.util';
 import { buildOnemaAccessSubject } from 'src/engine/onema-access/utils/resolve-onema-access-subject.util';
@@ -1197,6 +1198,19 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
         rawRecordBefore: undefined,
         setColumns,
       })),
+    });
+
+    // Onema fork (ADR-003), ONE-115 (ADR-010 п.2): a record cannot be created
+    // under a parent whose own row already says nothing more may be hung on
+    // it — the foreign key being written is read the same way an update's new
+    // value is
+    await assertOnemaWriteIsPermittedByParentState({
+      scope: this.onemaAccessScope,
+      updates: formattedRecords.map((setColumns) => ({
+        rawRecordBefore: undefined,
+        setColumns,
+      })),
+      executeRaw: (sql, parameters) => this.executeRaw(sql, parameters),
     });
 
     validateRLSPredicatesForRecords({
@@ -2401,6 +2415,17 @@ export class WorkspaceRepository<TEntity extends ObjectLiteral = ObjectRecord> {
     assertOnemaTransitionIsPermitted({
       scope: this.onemaAccessScope,
       updates: lockedUpdates,
+    });
+
+    // Onema fork (ADR-003), ONE-115 (ADR-010 п.2): the same lock already taken
+    // for the freeze and the transition graph covers the write-side of this
+    // record; what it still writes is checked against its parent's state, old
+    // and new foreign key alike, so re-parenting onto a frozen parent is
+    // refused the same way staying under one already is
+    await assertOnemaWriteIsPermittedByParentState({
+      scope: this.onemaAccessScope,
+      updates: lockedUpdates,
+      executeRaw: (sql, parameters) => this.executeRaw(sql, parameters),
     });
   }
 
