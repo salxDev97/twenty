@@ -963,6 +963,290 @@ describe('onemaWriteAccess', () => {
     });
   });
 
+  // ONE-115, ADR-010 п.2: the mirror of a frozen record for a condition that
+  // lives on the parent instead — the archived data room whose materials and
+  // acceptances this stands in for. `company`/`person` are the proxies here,
+  // the same way `person`/`company` already stand in for the freeze above;
+  // `company.name` plays the role `onemaDataroom.status` would in the real
+  // rule, since the standard object carries no status field of its own.
+  describe("a child frozen by its parent's state (ONE-115)", () => {
+    const FROZEN_PARENT_COMPANY_NAME = 'Onema write access (frozen parent)';
+    const ACTIVE_PARENT_COMPANY_NAME = 'Onema write access (active parent)';
+    const PARENT_FROZEN_PERSON_JOB_TITLE =
+      'Onema write access (parent-frozen person)';
+    const CREATED_UNDER_ACTIVE_PARENT_JOB_TITLE =
+      'Onema write access (created under active parent)';
+
+    const frozenByParentRules = (): OnemaAccessRules => ({
+      roles: { member: memberRoleUniversalIdentifier },
+      objects: {
+        company: { member: { all: true } },
+        person: { member: { all: true } },
+      },
+      writeFrozenByParent: {
+        person: [
+          {
+            foreignKey: 'company',
+            object: 'company',
+            field: 'name',
+            equals: FROZEN_PARENT_COMPANY_NAME,
+          },
+        ],
+      },
+    });
+
+    let frozenParentCompanyId: string;
+    let activeParentCompanyId: string;
+    let parentFrozenPersonId: string;
+
+    beforeAll(async () => {
+      setOnemaAccessRulesForTesting(undefined);
+
+      frozenParentCompanyId = (
+        await createFixtureCompany({
+          name: FROZEN_PARENT_COMPANY_NAME,
+          accountOwnerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+        })
+      ).id;
+      activeParentCompanyId = (
+        await createFixtureCompany({
+          name: ACTIVE_PARENT_COMPANY_NAME,
+          accountOwnerId: WORKSPACE_MEMBER_DATA_SEED_IDS.JONY,
+        })
+      ).id;
+      parentFrozenPersonId = (
+        await createFixturePerson({
+          jobTitle: PARENT_FROZEN_PERSON_JOB_TITLE,
+          companyId: activeParentCompanyId,
+        })
+      ).id;
+    });
+
+    afterAll(async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await destroyFixtureRecords({
+        objectMetadataSingularName: 'person',
+        recordIds: [parentFrozenPersonId],
+      });
+      await destroyFixtureRecords({
+        objectMetadataSingularName: 'company',
+        recordIds: [frozenParentCompanyId, activeParentCompanyId],
+      });
+    });
+
+    afterEach(async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle company { id }',
+          recordId: parentFrozenPersonId,
+          data: {
+            jobTitle: PARENT_FROZEN_PERSON_JOB_TITLE,
+            companyId: activeParentCompanyId,
+          },
+        }),
+      );
+    });
+
+    it('refuses creating a child under an already-frozen parent', async () => {
+      setOnemaAccessRulesForTesting(frozenByParentRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          createOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle',
+            data: {
+              jobTitle: REFUSED_PERSON_JOB_TITLE,
+              companyId: frozenParentCompanyId,
+            },
+          }),
+        ),
+      );
+
+      expect(
+        await readBehindTheRules<SeedPerson>({
+          objectMetadataSingularName: 'person',
+          objectMetadataPluralName: 'people',
+          gqlFields: 'id jobTitle',
+          filter: { jobTitle: { eq: REFUSED_PERSON_JOB_TITLE } },
+        }),
+      ).toEqual([]);
+    });
+
+    it('allows creating a child under a parent that is not frozen', async () => {
+      setOnemaAccessRulesForTesting(frozenByParentRules());
+
+      const creation = await makeRequestAsJony(
+        createOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle',
+          data: {
+            jobTitle: CREATED_UNDER_ACTIVE_PARENT_JOB_TITLE,
+            companyId: activeParentCompanyId,
+          },
+        }),
+      );
+
+      expect(creation.body.errors).toBeUndefined();
+
+      setOnemaAccessRulesForTesting(undefined);
+      await destroyFixtureRecords({
+        objectMetadataSingularName: 'person',
+        recordIds: [creation.body.data.createPerson.id],
+      });
+    });
+
+    it('refuses editing a child whose parent is already frozen', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: parentFrozenPersonId,
+          data: { companyId: frozenParentCompanyId },
+        }),
+      );
+
+      setOnemaAccessRulesForTesting(frozenByParentRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle',
+            recordId: parentFrozenPersonId,
+            data: { jobTitle: 'renamed while archived' },
+          }),
+        ),
+      );
+
+      expect(
+        (
+          await readBehindTheRules<SeedPerson>({
+            objectMetadataSingularName: 'person',
+            objectMetadataPluralName: 'people',
+            gqlFields: 'id jobTitle',
+            filter: { id: { eq: parentFrozenPersonId } },
+          })
+        )[0].jobTitle,
+      ).toBe(PARENT_FROZEN_PERSON_JOB_TITLE);
+    });
+
+    it('refuses moving a child away from a frozen parent', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: parentFrozenPersonId,
+          data: { companyId: frozenParentCompanyId },
+        }),
+      );
+
+      setOnemaAccessRulesForTesting(frozenByParentRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id company { id }',
+            recordId: parentFrozenPersonId,
+            data: { companyId: activeParentCompanyId },
+          }),
+        ),
+      );
+
+      expect(await readPersonCompanyId(parentFrozenPersonId)).toBe(
+        frozenParentCompanyId,
+      );
+    });
+
+    it('refuses moving a child onto a frozen parent', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: parentFrozenPersonId,
+          data: { companyId: activeParentCompanyId },
+        }),
+      );
+
+      setOnemaAccessRulesForTesting(frozenByParentRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id company { id }',
+            recordId: parentFrozenPersonId,
+            data: { companyId: frozenParentCompanyId },
+          }),
+        ),
+      );
+
+      expect(await readPersonCompanyId(parentFrozenPersonId)).toBe(
+        activeParentCompanyId,
+      );
+    });
+
+    it('allows writing a child under a parent that is not frozen', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: parentFrozenPersonId,
+          data: { companyId: activeParentCompanyId },
+        }),
+      );
+
+      setOnemaAccessRulesForTesting(frozenByParentRules());
+
+      const edit = await makeRequestAsJony(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id jobTitle',
+          recordId: parentFrozenPersonId,
+          data: { jobTitle: 'renamed while active' },
+        }),
+      );
+
+      expect(edit.body.errors).toBeUndefined();
+    });
+
+    it('refuses soft-deleting a child whose parent is frozen', async () => {
+      setOnemaAccessRulesForTesting(undefined);
+      await makeRequestAsAdmin(
+        updateOneOperationFactory({
+          objectMetadataSingularName: 'person',
+          gqlFields: 'id company { id }',
+          recordId: parentFrozenPersonId,
+          data: { companyId: frozenParentCompanyId },
+        }),
+      );
+
+      setOnemaAccessRulesForTesting(frozenByParentRules());
+
+      expectForbidden(
+        await makeRequestAsJony(
+          deleteManyOperationFactory({
+            objectMetadataSingularName: 'person',
+            objectMetadataPluralName: 'people',
+            gqlFields: 'id',
+            filter: { id: { eq: parentFrozenPersonId } },
+          }),
+        ),
+      );
+
+      expect(await readSoftDeletedPersonIds([parentFrozenPersonId])).toEqual(
+        [],
+      );
+    });
+  });
+
   // Б4, the other half, and what checking it turned up. The review read the
   // merge runner building its returning list out of the GraphQL selection and
   // called a false refusal possible; it is not, because `buildColumnsToSelect`

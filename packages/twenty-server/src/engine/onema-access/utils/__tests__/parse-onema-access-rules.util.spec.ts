@@ -16,6 +16,7 @@ describe('parseOnemaAccessRules', () => {
       writeProtectedFields: {},
       writeRequiresParentAccess: {},
       freezeWhen: {},
+      writeFrozenByParent: {},
       transitions: {},
       objects: {
         opportunity: {
@@ -55,6 +56,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { anyParent: { fks: ['leadId'] } } } },
       }),
@@ -78,6 +80,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -92,6 +95,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { project: {} },
       }),
@@ -106,6 +110,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { project: {} },
       }),
@@ -123,6 +128,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           opportunity: { ceo: { all: true }, sales: { eq: ['owner', '$me'] } },
@@ -139,6 +145,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { projectManager: { all: true } } },
       }),
@@ -153,6 +160,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           project: {
@@ -180,6 +188,7 @@ describe('parseOnemaAccessRules', () => {
         projectMember: [{ foreignKey: 'project', object: 'project' }],
       },
       freezeWhen: {},
+      writeFrozenByParent: {},
       transitions: {},
       objects: {
         project: {
@@ -209,6 +218,7 @@ describe('parseOnemaAccessRules', () => {
           dataRoomItem: [{ foreignKey: 'project', object: 'project' }],
         },
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           project: {
@@ -235,6 +245,7 @@ describe('parseOnemaAccessRules', () => {
           dataRoomItem: [{ foreignKey: 'project', object: 'project' }],
         },
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           project: {
@@ -267,6 +278,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           project: {
@@ -290,6 +302,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           dataRoomItem: {
@@ -321,6 +334,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           project: {
@@ -356,6 +370,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           dataRoomItem: {
@@ -385,6 +400,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           project: {
@@ -411,6 +427,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           opportunity: {
@@ -438,6 +455,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           dataRoomItem: {
@@ -463,6 +481,7 @@ describe('parseOnemaAccessRules', () => {
       requiredObjects: [],
       writeProtectedFields: {},
       freezeWhen: {},
+      writeFrozenByParent: {},
       transitions: {},
       writeRequiresParentAccess: {},
       objects: {
@@ -495,6 +514,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         writeRequiresParentAccess: {},
         objects: {
@@ -531,6 +551,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         writeRequiresParentAccess: {},
         objects: {
@@ -557,6 +578,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         writeRequiresParentAccess: {},
         objects: {
@@ -582,6 +604,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         writeRequiresParentAccess: {},
         objects: {
@@ -614,6 +637,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           note: {
@@ -653,6 +677,7 @@ describe('parseOnemaAccessRules', () => {
       requiredObjects: [],
       writeProtectedFields: {},
       freezeWhen: {},
+      writeFrozenByParent: {},
       transitions: {},
       objects,
     };
@@ -691,6 +716,7 @@ describe('parseOnemaAccessRules', () => {
         requiredObjects: [],
         writeProtectedFields: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: {
           project: {
@@ -725,6 +751,7 @@ describe('parseOnemaAccessRules', () => {
           { field: 'onemaStage', equals: 'DEAL', fields: ['company'] },
         ],
       },
+      writeFrozenByParent: {},
       transitions: {},
     };
 
@@ -737,6 +764,7 @@ describe('parseOnemaAccessRules', () => {
         roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
         requiredObjects: [],
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -753,6 +781,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: { opportunity: { onemaPaymentConfirmation: [] } },
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -768,6 +797,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: { opportunity: { orgRole: ['ceo'] } },
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -781,6 +811,7 @@ describe('parseOnemaAccessRules', () => {
       writeProtectedFields: {},
       writeRequiresParentAccess: {},
       freezeWhen: {},
+      writeFrozenByParent: {},
       transitions: {},
       objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
       ownerDefaults: { opportunity: { sales: 'owner' } },
@@ -799,6 +830,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
         ownerDefaults: { opportunity: { sales: 'assignee' } },
@@ -814,6 +846,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { eq: ['owner', '$me'] } } },
         ownerDefaults: { opportunity: { ceo: 'owner' } },
@@ -829,6 +862,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: { opportunity: [] },
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -852,6 +886,7 @@ describe('parseOnemaAccessRules', () => {
             },
           ],
         },
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -874,6 +909,7 @@ describe('parseOnemaAccessRules', () => {
             },
           ],
         },
+        writeFrozenByParent: {},
         transitions: {},
         objects: { opportunity: { sales: { all: true } } },
       }),
@@ -888,6 +924,7 @@ describe('parseOnemaAccessRules', () => {
       writeProtectedFields: {},
       writeRequiresParentAccess: {},
       freezeWhen: {},
+      writeFrozenByParent: {},
       transitions: {
         onemaEstimate: {
           field: 'status',
@@ -915,6 +952,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {
           onemaEstimate: {
             field: 'status',
@@ -935,6 +973,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {
           onemaEstimate: {
             field: 'status',
@@ -958,6 +997,7 @@ describe('parseOnemaAccessRules', () => {
         writeProtectedFields: {},
         writeRequiresParentAccess: {},
         freezeWhen: {},
+        writeFrozenByParent: {},
         transitions: {
           onemaEstimate: {
             field: 'status',

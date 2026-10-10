@@ -82,6 +82,33 @@ export type OnemaWriteRequiresParentAccess = Record<
   OnemaParentCondition[]
 >;
 
+// ONE-115 (ADR-010 п.2): a child is read-only while its parent sits in a named
+// state — the archived data room whose materials, members and acceptances
+// nobody may write any more, even though `objects` still lets the same roles
+// read it. `freezeWhen` only ever compares the record's own row; this is its
+// mirror for a condition that lives one hop away, on `object` through
+// `foreignKey`. Unlike `writeRequiresParentAccess`, the parent's own `objects`
+// rule is never consulted — the check reads one column of the parent, not
+// whether the parent is visible to the author.
+export type OnemaWriteFrozenByParentRule = {
+  foreignKey: string;
+  object: string;
+  field: string;
+  equals: OnemaConditionValue;
+  // Mirrors the application's exemption from `writeRequiresParentAccess`
+  // (Б5): our own logic functions write under an application token that has
+  // no `$me`, and the ones that touch these children run from server-side
+  // commands the archived state is not meant to block. Defaults to true so a
+  // rule written like the example needs no extra key; set to false where the
+  // application itself must stay out too.
+  allowApplication?: boolean;
+};
+
+export type OnemaWriteFrozenByParent = Record<
+  string,
+  OnemaWriteFrozenByParentRule[]
+>;
+
 // rls-design §12а Т-3/Т-7 (hardening.md п. 3): one edge of the status graph of
 // an object — a single starting value and the values it may move to from
 // there, plus who besides the application may drive it. `null` in `from`
@@ -127,6 +154,11 @@ export type OnemaAccessRules = {
   // key leaves every access-granting link open, and reads exactly like a
   // deliberate "no link grants anybody access"
   writeRequiresParentAccess?: OnemaWriteRequiresParentAccess;
+  // Mandatory in a file for the same reason as writeRequiresParentAccess: a
+  // forgotten key would leave every child of every parent writable regardless
+  // of the parent's own state, and that has to look different from a
+  // deliberate "no object is frozen by its parent"
+  writeFrozenByParent?: OnemaWriteFrozenByParent;
   // Mandatory in a file for the same reason as writeProtectedFields and
   // writeRequiresParentAccess: a forgotten key would leave every status
   // transition of every object open, indistinguishable from "this object has

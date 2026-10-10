@@ -12,6 +12,7 @@ const workspaceMemberTableShape = buildTestTableShape({
 });
 const projectTableShape = buildTestTableShape({
   nameSingular: 'project',
+  columnNames: ['status'],
   joinColumnNameByFieldName: { projectManager: 'projectManagerId' },
   relationTargetByFieldName: { projectManager: 'workspaceMember' },
 });
@@ -351,6 +352,98 @@ describe('validateOnemaAccessRulesAgainstMetadata', () => {
       validation.kind === 'invalid' && validation.problems.join('; '),
     ).toMatch(
       /writeRequiresParentAccess: "member" of "projectMember" points at another object than "project"/,
+    );
+  });
+
+  it('accepts a writeFrozenByParent rule whose link and field both exist', () => {
+    expect(
+      validate({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        objects: { project: { sales: { all: true } } },
+        writeFrozenByParent: {
+          task: [
+            {
+              foreignKey: 'project',
+              object: 'project',
+              field: 'status',
+              equals: 'ARCHIVED',
+            },
+          ],
+        },
+      }),
+    ).toEqual({ kind: 'valid' });
+  });
+
+  it('rejects a writeFrozenByParent rule naming no object of this workspace', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+      writeFrozenByParent: {
+        onemaDataroomItem: [
+          {
+            foreignKey: 'dataroom',
+            object: 'project',
+            field: 'status',
+            equals: 'ARCHIVED',
+          },
+        ],
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(
+      /writeFrozenByParent names no object of this workspace \("onemaDataroomItem"\)/,
+    );
+  });
+
+  // A mistyped foreign key here leaves the child writable regardless of its
+  // parent's state — the same slip collectWriteParentProblems already guards
+  // against for writeRequiresParentAccess
+  it('rejects a writeFrozenByParent rule whose foreign key points somewhere else', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+      writeFrozenByParent: {
+        task: [
+          {
+            foreignKey: 'id',
+            object: 'project',
+            field: 'status',
+            equals: 'ARCHIVED',
+          },
+        ],
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(/writeFrozenByParent: "id" is no relation of "task"/);
+  });
+
+  it('rejects a writeFrozenByParent rule whose field is not a field of the parent', () => {
+    const validation = validate({
+      roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+      objects: { project: { sales: { all: true } } },
+      writeFrozenByParent: {
+        task: [
+          {
+            foreignKey: 'project',
+            object: 'project',
+            field: 'archivalState',
+            equals: 'ARCHIVED',
+          },
+        ],
+      },
+    });
+
+    expect(validation.kind).toBe('invalid');
+    expect(
+      validation.kind === 'invalid' && validation.problems.join('; '),
+    ).toMatch(
+      /writeFrozenByParent: "archivalState" is no single-column field of "project"/,
     );
   });
 

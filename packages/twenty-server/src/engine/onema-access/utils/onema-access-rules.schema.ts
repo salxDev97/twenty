@@ -112,6 +112,23 @@ export const onemaAccessRulesSchema = z.strictObject({
       )
       .min(1),
   ),
+  // Mandatory and `{}` for "no object is frozen by its parent", for the same
+  // reason as writeRequiresParentAccess: a forgotten key would leave every
+  // child writable no matter what its parent's row holds
+  writeFrozenByParent: z.record(
+    z.string().min(1),
+    z
+      .array(
+        z.strictObject({
+          foreignKey: z.string().min(1),
+          object: z.string().min(1),
+          field: z.string().min(1),
+          equals: onemaConditionValueSchema,
+          allowApplication: z.boolean().optional(),
+        }),
+      )
+      .min(1),
+  ),
   // Mandatory and `{}` for "no object has a guarded status field", for the
   // same reason as writeProtectedFields and writeRequiresParentAccess: a
   // forgotten key would leave every status transition open, and that has to
