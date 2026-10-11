@@ -265,9 +265,79 @@ describe('parseOnemaAccessRules', () => {
     ).toThrow(/nest deeper than/);
   });
 
-  // The compiler ORs the rules of every role its subject holds, so a chain that
-  // no single role closes on its own still closes in the generated SQL
-  it('rejects a cycle that only closes across two roles', () => {
+  // ONE-203 (П17): a circle is counted in the graph of one role. This one
+  // exists only for a subject holding both roles, and there the compiler
+  // prunes it to "no rows" at the hop that closes it — "sales" still reaches
+  // the task, "ceo" still reaches the project, and the branch that is lost
+  // could only have widened a path already granted one level up. Refusing the
+  // file took away two perfectly good ways into the same pair of objects.
+  it('accepts a chain that only closes across two roles', () => {
+    const rules = {
+      roles: {
+        sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      writeFrozenByParent: {},
+      transitions: {},
+      objects: {
+        project: {
+          sales: { parent: { foreignKey: 'task', object: 'task' } },
+        },
+        task: {
+          ceo: { parent: { foreignKey: 'project', object: 'project' } },
+        },
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  // The shape П17 needs: the contractor sees a project only through their own
+  // membership row, and the staff see a membership row through the project it
+  // joins. Each role's own rule is a straight line; only putting the two
+  // together makes a circle, and no participant holds both.
+  it('accepts a contractor reading through membership while the staff read membership through the project', () => {
+    const rules = {
+      roles: {
+        contractor: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        projectManager: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      writeFrozenByParent: {},
+      transitions: {},
+      objects: {
+        onemaProject: {
+          contractor: {
+            exists: {
+              object: 'onemaProjectMember',
+              backForeignKey: 'project',
+              where: { eq: ['member', '$me'] },
+            },
+          },
+          projectManager: { eq: ['projectManager', '$me'] },
+        },
+        onemaProjectMember: {
+          contractor: { eq: ['member', '$me'] },
+          projectManager: {
+            parent: { foreignKey: 'project', object: 'onemaProject' },
+          },
+        },
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  // The role's own graph is still walked whole: a circle one role closes by
+  // itself is the unbounded join it always was, whatever the other roles do
+  it('still rejects a cycle one role closes on its own while another reaches the same objects', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: {
@@ -283,9 +353,11 @@ describe('parseOnemaAccessRules', () => {
         objects: {
           project: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },
+            ceo: { all: true },
           },
           task: {
-            ceo: { parent: { foreignKey: 'project', object: 'project' } },
+            sales: { parent: { foreignKey: 'project', object: 'project' } },
+            ceo: { all: true },
           },
         },
       }),

@@ -290,6 +290,71 @@ describe('compileOnemaRowAccess', () => {
     });
   });
 
+  // ONE-203 (П17), the compile side of the chain the loader now accepts: the
+  // contractor sees a project through their own membership row, the project
+  // manager sees a membership row through the project it joins, and only a
+  // subject holding both roles puts the two together. The branch that closes
+  // the circle is pruned where it closes — the membership row still answers to
+  // the contractor's own rule, and the project manager's rule is untouched.
+  it('prunes only the branch that closes a circle across two roles', () => {
+    const context = buildContext({
+      rules: {
+        roles: baseRoles,
+        objects: {
+          project: {
+            contractor: {
+              exists: {
+                object: 'projectMember',
+                backForeignKey: 'project',
+                where: { eq: ['member', '$me'] },
+              },
+            },
+            projectManager: { eq: ['projectManager', '$me'] },
+          },
+          projectMember: {
+            contractor: { eq: ['member', '$me'] },
+            projectManager: {
+              parent: { foreignKey: 'project', object: 'project' },
+            },
+          },
+        },
+      },
+      subject: {
+        workspaceMemberId: WORKSPACE_MEMBER_ID,
+        roleUniversalIdentifiers: [
+          CONTRACTOR_ROLE_UNIVERSAL_IDENTIFIER,
+          PROJECT_MANAGER_ROLE_UNIVERSAL_IDENTIFIER,
+        ],
+      },
+    });
+
+    const rowAccess = compileOnemaRowAccess({
+      tableShape: projectTableShape,
+      tableAlias: 'project',
+      context,
+    });
+
+    expect(rowAccess).toEqual({
+      kind: 'gated',
+      condition: {
+        sql:
+          '(("project"."projectManagerId" = :onema_0_project_p0) OR ' +
+          '(EXISTS (SELECT 1 FROM "workspace_test"."_projectMember" AS "onema_0_project_t1" ' +
+          'WHERE "onema_0_project_t1"."projectId" = "project"."id" ' +
+          'AND "onema_0_project_t1"."deletedAt" IS NULL ' +
+          // The membership row under the contractor's own rule; the project
+          // manager's rule for it is the branch the circle costs
+          'AND ("onema_0_project_t1"."memberId" = :onema_0_project_p2) ' +
+          'AND ("onema_0_project_t1"."memberId" = :onema_0_project_p3))))',
+        parameters: {
+          onema_0_project_p0: WORKSPACE_MEMBER_ID,
+          onema_0_project_p2: WORKSPACE_MEMBER_ID,
+          onema_0_project_p3: WORKSPACE_MEMBER_ID,
+        },
+      },
+    });
+  });
+
   it('requires the parent to be visible to the same role', () => {
     const context = buildContext({
       rules: {
