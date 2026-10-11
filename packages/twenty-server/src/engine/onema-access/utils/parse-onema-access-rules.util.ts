@@ -12,10 +12,15 @@ import {
 import {
   type OnemaAccessRules,
   type OnemaCondition,
+  type OnemaTransitionRule,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { closesOnemaRuleCycle } from 'src/engine/onema-access/utils/closes-onema-rule-cycle.util';
 import { isOnemaPolymorphicParentSet } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import { onemaAccessRulesSchema } from 'src/engine/onema-access/utils/onema-access-rules.schema';
+import {
+  readOnemaTransitionTargetRoleKeys,
+  readOnemaTransitionTargetValue,
+} from 'src/engine/onema-access/utils/read-onema-transition-target.util';
 
 const CURRENT_MEMBER_TOKEN = '$me';
 
@@ -119,8 +124,16 @@ const validateWriteProtectedFields = (rules: OnemaAccessRules): void => {
 const validateTransitionRules = (rules: OnemaAccessRules): void => {
   const transitionsByObjectName = Object.entries(rules.transitions ?? {});
 
+  // ONE-203: a target naming no role of its own is application-only just as an
+  // edge is, so the file needs the application either way
   const needsApplication = transitionsByObjectName.some(
-    ([, { rules: edges }]) => edges.some((edge) => edge.roleKeys.length === 0),
+    ([, { rules: edges }]) =>
+      edges.some((edge) =>
+        edge.to.some(
+          (target) =>
+            readOnemaTransitionTargetRoleKeys({ target, edge }).length === 0,
+        ),
+      ),
   );
 
   if (needsApplication && !isDefined(rules.application)) {
@@ -145,14 +158,63 @@ const validateTransitionRules = (rules: OnemaAccessRules): void => {
 
       seenFromValues.add(edge.from);
 
-      for (const roleKey of edge.roleKeys) {
-        if (!isDefined(rules.roles[roleKey])) {
-          throw new OnemaAccessException(
-            `Onema access rules let role "${roleKey}" drive the transition of "${objectName}.${field}" without declaring its role id`,
-            OnemaAccessExceptionCode.INVALID_RULES,
-          );
-        }
+      validateTransitionTargets({ rules, objectName, field, edge });
+    }
+  }
+};
+
+// ONE-203. One target of one edge is now a place roles can be written, so the
+// two slips a role list can carry are checked there too: an undeclared role
+// key, and the same destination named twice — which, since each target carries
+// its own roles, is the very ambiguity a repeated `from` is refused for one
+// level up.
+const validateTransitionTargets = ({
+  rules,
+  objectName,
+  field,
+  edge,
+}: {
+  rules: OnemaAccessRules;
+  objectName: string;
+  field: string;
+  edge: OnemaTransitionRule;
+}): void => {
+  const seenTargetValues = new Set<OnemaCondition['eq'][1]>();
+
+  for (const target of edge.to) {
+    const targetValue = readOnemaTransitionTargetValue(target);
+
+    if (seenTargetValues.has(targetValue)) {
+      throw new OnemaAccessException(
+        `Onema access rules name "${JSON.stringify(
+          targetValue,
+        )}" twice among the targets of "${objectName}.${field}" from ${JSON.stringify(
+          edge.from,
+        )}`,
+        OnemaAccessExceptionCode.INVALID_RULES,
+      );
+    }
+
+    seenTargetValues.add(targetValue);
+
+    for (const roleKey of readOnemaTransitionTargetRoleKeys({ target, edge })) {
+      if (!isDefined(rules.roles[roleKey])) {
+        throw new OnemaAccessException(
+          `Onema access rules let role "${roleKey}" drive the transition of "${objectName}.${field}" without declaring its role id`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
       }
+    }
+  }
+
+  // An edge whose every target names its own roles never reads the edge's
+  // list, so a role declared nowhere would sit there unnoticed
+  for (const roleKey of edge.roleKeys) {
+    if (!isDefined(rules.roles[roleKey])) {
+      throw new OnemaAccessException(
+        `Onema access rules let role "${roleKey}" drive the transition of "${objectName}.${field}" without declaring its role id`,
+        OnemaAccessExceptionCode.INVALID_RULES,
+      );
     }
   }
 };

@@ -433,6 +433,34 @@
         { "from": "CEO_APPROVED", "to": ["SENT"], "roleKeys": [] },
         { "from": "SENT", "to": ["ACCEPTED"], "roleKeys": [] }
       ]
+    },
+    "task": {
+      "field": "onemaStatus",
+      "rules": [
+        {
+          "from": null,
+          "to": ["TODO"],
+          "roleKeys": ["projectManager", "deliveryHead"]
+        },
+        {
+          "from": "TODO",
+          "to": ["IN_PROGRESS"],
+          "roleKeys": ["contractor", "projectManager", "deliveryHead"]
+        },
+        {
+          "from": "IN_PROGRESS",
+          "to": [
+            "IN_REVIEW",
+            { "value": "DONE", "roleKeys": ["projectManager", "deliveryHead"] }
+          ],
+          "roleKeys": ["contractor", "projectManager", "deliveryHead"]
+        },
+        {
+          "from": "IN_REVIEW",
+          "to": ["DONE"],
+          "roleKeys": ["projectManager", "deliveryHead"]
+        }
+      ]
     }
   },
   "ownerDefaults": {

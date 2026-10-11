@@ -56,9 +56,21 @@ const onemaFreezeRuleSchema = z.strictObject({
   isIrreversible: z.boolean().optional(),
 });
 
+// ONE-203: a bare value takes the edge's own roles, a named target carries its
+// own. `strictObject` keeps a misspelled key of a named target from passing as
+// a target nobody named — an object matches no value of the graph either, so
+// the whole file is refused
+const onemaTransitionTargetSchema = z.union([
+  z.strictObject({
+    value: onemaConditionValueSchema,
+    roleKeys: z.array(z.string().min(1)),
+  }),
+  onemaConditionValueSchema,
+]);
+
 const onemaTransitionRuleSchema = z.strictObject({
   from: onemaConditionValueSchema,
-  to: z.array(onemaConditionValueSchema).min(1),
+  to: z.array(onemaTransitionTargetSchema).min(1),
   // `[]` is the way to say "the application alone" — see the type's own
   // comment. Omitting the key entirely has no such reading, so it stays
   // mandatory the same way writeProtectedFields' role list is

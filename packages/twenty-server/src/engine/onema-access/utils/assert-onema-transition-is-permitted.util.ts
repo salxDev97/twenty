@@ -3,10 +3,15 @@ import { isDefined } from 'twenty-shared/utils';
 import {
   type OnemaObjectTransitionRules,
   type OnemaTransitionRule,
+  type OnemaTransitionTarget,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { isOnemaApplicationActor } from 'src/engine/onema-access/utils/is-onema-application-actor.util';
 import { isOnemaSameWrittenValue } from 'src/engine/onema-access/utils/is-onema-same-written-value.util';
 import { onemaWriteDenied } from 'src/engine/onema-access/utils/onema-write-denied.util';
+import {
+  readOnemaTransitionTargetRoleKeys,
+  readOnemaTransitionTargetValue,
+} from 'src/engine/onema-access/utils/read-onema-transition-target.util';
 import { resolveOnemaFieldColumnNames } from 'src/engine/onema-access/utils/resolve-onema-field-columns.util';
 import {
   type OnemaAccessScope,
@@ -141,7 +146,13 @@ const assertTransitionIsPermitted = ({
     );
   }
 
-  if (!edge.to.some((allowed) => isOnemaSameWrittenValue(allowed, toValue))) {
+  // By index, not by value: `null` is a destination like any other, and a
+  // `find` would report the edge that allows it as no edge at all
+  const targetIndex = edge.to.findIndex((candidate) =>
+    isOnemaSameWrittenValue(readOnemaTransitionTargetValue(candidate), toValue),
+  );
+
+  if (targetIndex === -1) {
     throw onemaWriteDenied(
       `"${tableShape.nameSingular}.${transitionRules.field}" may not move from "${describeValue(
         fromValue,
@@ -151,6 +162,7 @@ const assertTransitionIsPermitted = ({
 
   assertActorMayCrossEdge({
     edge,
+    target: edge.to[targetIndex],
     tableShape,
     transitionField: transitionRules.field,
     isApplicationActor,
@@ -158,14 +170,19 @@ const assertTransitionIsPermitted = ({
   });
 };
 
+// ONE-203: the roles are read off the target the write actually moves to, and
+// only fall back to the edge when that target names nobody — a contractor may
+// send a task to review along the same edge the staff roles use to close it.
 const assertActorMayCrossEdge = ({
   edge,
+  target,
   tableShape,
   transitionField,
   isApplicationActor,
   actorRoleKeys,
 }: {
   edge: OnemaTransitionRule;
+  target: OnemaTransitionTarget;
   tableShape: WorkspaceTableShape;
   transitionField: string;
   isApplicationActor: boolean;
@@ -175,18 +192,20 @@ const assertActorMayCrossEdge = ({
     return;
   }
 
-  if (edge.roleKeys.some((roleKey) => actorRoleKeys.includes(roleKey))) {
+  const roleKeys = readOnemaTransitionTargetRoleKeys({ target, edge });
+
+  if (roleKeys.some((roleKey) => actorRoleKeys.includes(roleKey))) {
     return;
   }
 
+  const move = `"${tableShape.nameSingular}.${transitionField}" from "${describeValue(
+    edge.from,
+  )}" to "${describeValue(readOnemaTransitionTargetValue(target))}"`;
+
   throw onemaWriteDenied(
-    edge.roleKeys.length === 0
-      ? `"${tableShape.nameSingular}.${transitionField}" from "${describeValue(
-          edge.from,
-        )}" is driven by the application only`
-      : `"${tableShape.nameSingular}.${transitionField}" from "${describeValue(
-          edge.from,
-        )}" is driven only by roles ${edge.roleKeys.join(', ')} or the application`,
+    roleKeys.length === 0
+      ? `${move} is driven by the application only`
+      : `${move} is driven only by roles ${roleKeys.join(', ')} or the application`,
   );
 };
 

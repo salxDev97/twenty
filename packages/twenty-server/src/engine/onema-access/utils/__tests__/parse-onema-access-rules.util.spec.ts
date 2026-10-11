@@ -1011,4 +1011,150 @@ describe('parseOnemaAccessRules', () => {
       }),
     ).toThrow(/starting from the same value/);
   });
+
+  // ONE-203: the roles may sit on the pair of from and to, and a file written
+  // before that existed still parses to exactly what it says
+  it('accepts an edge whose targets carry their own roles', () => {
+    const rules = {
+      application: 'onema-application',
+      roles: {
+        sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      writeFrozenByParent: {},
+      transitions: {
+        task: {
+          field: 'onemaStatus',
+          rules: [
+            {
+              from: 'IN_PROGRESS',
+              to: ['IN_REVIEW', { value: 'DONE', roleKeys: ['ceo'] }],
+              roleKeys: ['sales', 'ceo'],
+            },
+          ],
+        },
+      },
+      objects: { opportunity: { sales: { all: true } } },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  it('rejects a transition target handed to a role nobody declared', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        writeFrozenByParent: {},
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: [{ value: 'DONE', roleKeys: ['ceo'] }],
+                roleKeys: ['sales'],
+              },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/without declaring its role id/);
+  });
+
+  // A target naming nobody is application-only just as an edge is, even where
+  // the edge around it hands the state to a human role
+  it('rejects a target gated to the application without declaring one', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        writeFrozenByParent: {},
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: [{ value: 'DONE', roleKeys: [] }],
+                roleKeys: ['sales'],
+              },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/declare no "application"/);
+  });
+
+  // Each target carries its own roles, so one destination named twice is the
+  // very ambiguity a repeated `from` is refused for one level up
+  it('rejects one destination named twice among the targets of an edge', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: {
+          sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+          ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+        },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        writeFrozenByParent: {},
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: ['DONE', { value: 'DONE', roleKeys: ['ceo'] }],
+                roleKeys: ['sales'],
+              },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/twice among the targets/);
+  });
+
+  it('rejects a target whose own key is misspelled, rather than reading it as a value', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        writeFrozenByParent: {},
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: [{ value: 'DONE', rolekeys: ['sales'] }],
+                roleKeys: ['sales'],
+              },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/do not match the schema/);
+  });
 });
