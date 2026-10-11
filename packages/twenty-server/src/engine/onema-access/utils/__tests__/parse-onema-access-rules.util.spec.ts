@@ -265,9 +265,124 @@ describe('parseOnemaAccessRules', () => {
     ).toThrow(/nest deeper than/);
   });
 
-  // The compiler ORs the rules of every role its subject holds, so a chain that
-  // no single role closes on its own still closes in the generated SQL
-  it('rejects a cycle that only closes across two roles', () => {
+  // ONE-203 (П17): a circle is counted in the graph of one role. This one
+  // exists only for a subject holding both roles, and there the compiler
+  // prunes it to "no rows" at the hop that closes it — "sales" still reaches
+  // the task, "ceo" still reaches the project, and the branch that is lost
+  // could only have widened a path already granted one level up. Refusing the
+  // file took away two perfectly good ways into the same pair of objects.
+  it('accepts a chain that only closes across two roles', () => {
+    const rules = {
+      roles: {
+        sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      writeFrozenByParent: {},
+      transitions: {},
+      objects: {
+        project: {
+          sales: { parent: { foreignKey: 'task', object: 'task' } },
+        },
+        task: {
+          ceo: { parent: { foreignKey: 'project', object: 'project' } },
+        },
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  // The shape П17 needs: the contractor sees a project only through their own
+  // membership row, and the staff see a membership row through the project it
+  // joins. Each role's own rule is a straight line; only putting the two
+  // together makes a circle, and no participant holds both.
+  it('accepts a contractor reading through membership while the staff read membership through the project', () => {
+    const rules = {
+      roles: {
+        contractor: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        projectManager: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      writeFrozenByParent: {},
+      transitions: {},
+      objects: {
+        onemaProject: {
+          contractor: {
+            exists: {
+              object: 'onemaProjectMember',
+              backForeignKey: 'project',
+              where: { eq: ['member', '$me'] },
+            },
+          },
+          projectManager: { eq: ['projectManager', '$me'] },
+        },
+        onemaProjectMember: {
+          contractor: { eq: ['member', '$me'] },
+          projectManager: {
+            parent: { foreignKey: 'project', object: 'onemaProject' },
+          },
+        },
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  // Depth is counted in the same graph as a circle. The chain below is three
+  // objects for the contractor and three for the staff, and only stringing one
+  // role's rule onto the other's makes it four — which no participant holding
+  // a single role ever asks the database for.
+  it('counts depth in the graph of one role, not across the roles a chain passes', () => {
+    const rules = {
+      roles: {
+        sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      writeFrozenByParent: {},
+      transitions: {},
+      objects: {
+        company: {
+          ceo: {
+            exists: { object: 'onemaProject', backForeignKey: 'company' },
+          },
+        },
+        onemaProject: {
+          ceo: { eq: ['projectManager', '$me'] },
+          sales: {
+            exists: {
+              object: 'onemaProjectMember',
+              backForeignKey: 'project',
+              where: {
+                parent: { foreignKey: 'person', object: 'onemaPerson' },
+              },
+            },
+          },
+        },
+        onemaProjectMember: {
+          ceo: { parent: { foreignKey: 'project', object: 'onemaProject' } },
+          sales: { parent: { foreignKey: 'person', object: 'onemaPerson' } },
+        },
+        onemaPerson: { sales: { eq: ['workspaceMember', '$me'] } },
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  // The role's own graph is still walked whole: a circle one role closes by
+  // itself is the unbounded join it always was, whatever the other roles do
+  it('still rejects a cycle one role closes on its own while another reaches the same objects', () => {
     expect(() =>
       parseOnemaAccessRules({
         roles: {
@@ -283,9 +398,11 @@ describe('parseOnemaAccessRules', () => {
         objects: {
           project: {
             sales: { parent: { foreignKey: 'task', object: 'task' } },
+            ceo: { all: true },
           },
           task: {
-            ceo: { parent: { foreignKey: 'project', object: 'project' } },
+            sales: { parent: { foreignKey: 'project', object: 'project' } },
+            ceo: { all: true },
           },
         },
       }),
@@ -1010,5 +1127,151 @@ describe('parseOnemaAccessRules', () => {
         objects: { opportunity: { sales: { all: true } } },
       }),
     ).toThrow(/starting from the same value/);
+  });
+
+  // ONE-203: the roles may sit on the pair of from and to, and a file written
+  // before that existed still parses to exactly what it says
+  it('accepts an edge whose targets carry their own roles', () => {
+    const rules = {
+      application: 'onema-application',
+      roles: {
+        sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      writeFrozenByParent: {},
+      transitions: {
+        task: {
+          field: 'onemaStatus',
+          rules: [
+            {
+              from: 'IN_PROGRESS',
+              to: ['IN_REVIEW', { value: 'DONE', roleKeys: ['ceo'] }],
+              roleKeys: ['sales', 'ceo'],
+            },
+          ],
+        },
+      },
+      objects: { opportunity: { sales: { all: true } } },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
+  it('rejects a transition target handed to a role nobody declared', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        writeFrozenByParent: {},
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: [{ value: 'DONE', roleKeys: ['ceo'] }],
+                roleKeys: ['sales'],
+              },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/without declaring its role id/);
+  });
+
+  // A target naming nobody is application-only just as an edge is, even where
+  // the edge around it hands the state to a human role
+  it('rejects a target gated to the application without declaring one', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        writeFrozenByParent: {},
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: [{ value: 'DONE', roleKeys: [] }],
+                roleKeys: ['sales'],
+              },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/declare no "application"/);
+  });
+
+  // Each target carries its own roles, so one destination named twice is the
+  // very ambiguity a repeated `from` is refused for one level up
+  it('rejects one destination named twice among the targets of an edge', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: {
+          sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+          ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+        },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        writeFrozenByParent: {},
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: ['DONE', { value: 'DONE', roleKeys: ['ceo'] }],
+                roleKeys: ['sales'],
+              },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/twice among the targets/);
+  });
+
+  it('rejects a target whose own key is misspelled, rather than reading it as a value', () => {
+    expect(() =>
+      parseOnemaAccessRules({
+        application: 'onema-application',
+        roles: { sales: SALES_ROLE_UNIVERSAL_IDENTIFIER },
+        requiredObjects: [],
+        writeProtectedFields: {},
+        writeRequiresParentAccess: {},
+        freezeWhen: {},
+        writeFrozenByParent: {},
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: [{ value: 'DONE', rolekeys: ['sales'] }],
+                roleKeys: ['sales'],
+              },
+            ],
+          },
+        },
+        objects: { opportunity: { sales: { all: true } } },
+      }),
+    ).toThrow(/do not match the schema/);
   });
 });

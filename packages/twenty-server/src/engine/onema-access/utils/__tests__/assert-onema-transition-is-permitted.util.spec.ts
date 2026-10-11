@@ -4,6 +4,7 @@ import {
   applicationAuthContext,
   buildTestAccessScope,
   ceoAuthContext,
+  CEO_ROLE_UNIVERSAL_IDENTIFIER,
   salesAuthContext,
   SALES_ROLE_UNIVERSAL_IDENTIFIER,
   systemAuthContext,
@@ -237,7 +238,9 @@ describe('assertOnemaTransitionIsPermitted', () => {
         ],
         authContext: apiKeyAuthContext,
       }),
-    ).toThrow(/"onemaEstimate\.status" from "DRAFT" is driven only by roles/);
+    ).toThrow(
+      /"onemaEstimate\.status" from "DRAFT" to "IN_REVIEW" is driven only by roles/,
+    );
   });
 
   it('refuses a worker holding the bypass just the same (Б2)', () => {
@@ -327,6 +330,207 @@ describe('assertOnemaTransitionIsPermitted', () => {
           ],
         }),
       ).not.toThrow();
+    });
+  });
+
+  // ONE-203: the acceptance the task is about — a contractor reports work by
+  // sending the task to review and may never close it, while the staff roles
+  // leaving the same state may do both. One edge per `from` is the only shape
+  // the graph has for that, so the roles live on the pair.
+  //
+  // The harness carries two person roles, so "sales" stands in for the
+  // contractor and "ceo" for the project manager who accepts.
+  describe('roles named on one pair of from and to', () => {
+    const taskTableShape = buildTestTableShape({
+      nameSingular: 'task',
+      columnNames: ['title', 'onemaStatus'],
+    });
+
+    const taskTransitionRules: OnemaAccessRules = {
+      application: APPLICATION_UNIVERSAL_IDENTIFIER,
+      roles: {
+        contractor: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        projectManager: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      objects: {
+        task: { contractor: { all: true }, projectManager: { all: true } },
+      },
+      transitions: {
+        task: {
+          field: 'onemaStatus',
+          rules: [
+            {
+              from: 'IN_PROGRESS',
+              to: [
+                'IN_REVIEW',
+                { value: 'DONE', roleKeys: ['projectManager'] },
+              ],
+              roleKeys: ['contractor', 'projectManager'],
+            },
+            {
+              from: 'IN_REVIEW',
+              to: [{ value: 'DONE', roleKeys: ['projectManager'] }],
+              roleKeys: ['contractor', 'projectManager'],
+            },
+          ],
+        },
+      },
+    };
+
+    const assertTaskPermitted = ({
+      from,
+      to,
+      authContext,
+    }: {
+      from: string;
+      to: string;
+      authContext: WorkspaceAuthContext;
+    }) =>
+      assertOnemaTransitionIsPermitted({
+        scope: buildTestAccessScope({
+          tableShape: taskTableShape,
+          authContext,
+        }),
+        updates: [
+          {
+            rawRecordBefore: { id: 'task-1', onemaStatus: from },
+            setColumns: { onemaStatus: to },
+          },
+        ],
+      });
+
+    beforeEach(() => setOnemaAccessRulesForTesting(taskTransitionRules));
+
+    it('lets the contractor send the task to review', () => {
+      expect(() =>
+        assertTaskPermitted({
+          from: 'IN_PROGRESS',
+          to: 'IN_REVIEW',
+          authContext: salesAuthContext,
+        }),
+      ).not.toThrow();
+    });
+
+    it('refuses the contractor closing the task from the same state', () => {
+      expect(() =>
+        assertTaskPermitted({
+          from: 'IN_PROGRESS',
+          to: 'DONE',
+          authContext: salesAuthContext,
+        }),
+      ).toThrow(
+        /"task\.onemaStatus" from "IN_PROGRESS" to "DONE" is driven only by roles projectManager or the application/,
+      );
+    });
+
+    it('lets the accepting role make both moves out of the same state', () => {
+      for (const to of ['IN_REVIEW', 'DONE']) {
+        expect(() =>
+          assertTaskPermitted({
+            from: 'IN_PROGRESS',
+            to,
+            authContext: ceoAuthContext,
+          }),
+        ).not.toThrow();
+      }
+    });
+
+    it('refuses the contractor closing the task out of review', () => {
+      expect(() =>
+        assertTaskPermitted({
+          from: 'IN_REVIEW',
+          to: 'DONE',
+          authContext: salesAuthContext,
+        }),
+      ).toThrow(
+        /"task\.onemaStatus" from "IN_REVIEW" to "DONE" is driven only by roles projectManager or the application/,
+      );
+    });
+
+    it('lets the accepting role close the task out of review', () => {
+      expect(() =>
+        assertTaskPermitted({
+          from: 'IN_REVIEW',
+          to: 'DONE',
+          authContext: ceoAuthContext,
+        }),
+      ).not.toThrow();
+    });
+
+    // The target's own list replaces the edge's rather than narrowing it: a
+    // target may hand one move to somebody the edge never named
+    it('lets a target widen the edge it belongs to', () => {
+      setOnemaAccessRulesForTesting({
+        ...taskTransitionRules,
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_PROGRESS',
+                to: [{ value: 'IN_REVIEW', roleKeys: ['contractor'] }],
+                roleKeys: ['projectManager'],
+              },
+            ],
+          },
+        },
+      });
+
+      expect(() =>
+        assertTaskPermitted({
+          from: 'IN_PROGRESS',
+          to: 'IN_REVIEW',
+          authContext: salesAuthContext,
+        }),
+      ).not.toThrow();
+    });
+
+    it('gives a target naming no role to the application alone, whatever the edge says', () => {
+      setOnemaAccessRulesForTesting({
+        ...taskTransitionRules,
+        transitions: {
+          task: {
+            field: 'onemaStatus',
+            rules: [
+              {
+                from: 'IN_REVIEW',
+                to: [{ value: 'DONE', roleKeys: [] }],
+                roleKeys: ['contractor', 'projectManager'],
+              },
+            ],
+          },
+        },
+      });
+
+      expect(() =>
+        assertTaskPermitted({
+          from: 'IN_REVIEW',
+          to: 'DONE',
+          authContext: ceoAuthContext,
+        }),
+      ).toThrow(
+        /"task\.onemaStatus" from "IN_REVIEW" to "DONE" is driven by the application only/,
+      );
+
+      expect(() =>
+        assertTaskPermitted({
+          from: 'IN_REVIEW',
+          to: 'DONE',
+          authContext: applicationAuthContext,
+        }),
+      ).not.toThrow();
+    });
+
+    it('still refuses a destination no target of the edge names', () => {
+      expect(() =>
+        assertTaskPermitted({
+          from: 'IN_PROGRESS',
+          to: 'CANCELED',
+          authContext: ceoAuthContext,
+        }),
+      ).toThrow(
+        /"task\.onemaStatus" may not move from "IN_PROGRESS" to "CANCELED"/,
+      );
     });
   });
 

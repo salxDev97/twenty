@@ -119,9 +119,28 @@ export type OnemaWriteFrozenByParent = Record<
 // a role writing the status field itself over REST or GraphQL.
 export type OnemaTransitionRule = {
   from: OnemaConditionValue;
-  to: OnemaConditionValue[];
+  to: OnemaTransitionTarget[];
   roleKeys: OnemaRoleKey[];
 };
+
+// ONE-203: who may make this one move, when that is narrower than who may
+// leave `from` at all. A contractor reports a task done by sending it to
+// review and may never close it, while the staff roles leaving the same state
+// may do both — one edge per `from` cannot say that, and a second edge for the
+// same `from` is refused as ambiguous.
+//
+// A bare value is the edge's own `roleKeys`, unchanged: the format before this
+// existed stays a valid file, and a graph whose every move is open to the same
+// people is still written as a plain list of values.
+export type OnemaTransitionTarget =
+  | OnemaConditionValue
+  | {
+      value: OnemaConditionValue;
+      // Replaces the edge's list for this target rather than narrowing it: an
+      // intersection would make `roleKeys: []` on the edge — "the application
+      // alone" — silently swallow every target that tried to name a role
+      roleKeys: OnemaRoleKey[];
+    };
 
 // Keyed by object, then naming one status field of it. Only one field per
 // object is supported on purpose: a second status field of the same object

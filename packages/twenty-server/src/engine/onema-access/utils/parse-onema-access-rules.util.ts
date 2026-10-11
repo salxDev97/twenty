@@ -12,10 +12,15 @@ import {
 import {
   type OnemaAccessRules,
   type OnemaCondition,
+  type OnemaTransitionRule,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { closesOnemaRuleCycle } from 'src/engine/onema-access/utils/closes-onema-rule-cycle.util';
 import { isOnemaPolymorphicParentSet } from 'src/engine/onema-access/utils/compile-onema-row-access.util';
 import { onemaAccessRulesSchema } from 'src/engine/onema-access/utils/onema-access-rules.schema';
+import {
+  readOnemaTransitionTargetRoleKeys,
+  readOnemaTransitionTargetValue,
+} from 'src/engine/onema-access/utils/read-onema-transition-target.util';
 
 const CURRENT_MEMBER_TOKEN = '$me';
 
@@ -119,8 +124,16 @@ const validateWriteProtectedFields = (rules: OnemaAccessRules): void => {
 const validateTransitionRules = (rules: OnemaAccessRules): void => {
   const transitionsByObjectName = Object.entries(rules.transitions ?? {});
 
+  // ONE-203: a target naming no role of its own is application-only just as an
+  // edge is, so the file needs the application either way
   const needsApplication = transitionsByObjectName.some(
-    ([, { rules: edges }]) => edges.some((edge) => edge.roleKeys.length === 0),
+    ([, { rules: edges }]) =>
+      edges.some((edge) =>
+        edge.to.some(
+          (target) =>
+            readOnemaTransitionTargetRoleKeys({ target, edge }).length === 0,
+        ),
+      ),
   );
 
   if (needsApplication && !isDefined(rules.application)) {
@@ -145,14 +158,63 @@ const validateTransitionRules = (rules: OnemaAccessRules): void => {
 
       seenFromValues.add(edge.from);
 
-      for (const roleKey of edge.roleKeys) {
-        if (!isDefined(rules.roles[roleKey])) {
-          throw new OnemaAccessException(
-            `Onema access rules let role "${roleKey}" drive the transition of "${objectName}.${field}" without declaring its role id`,
-            OnemaAccessExceptionCode.INVALID_RULES,
-          );
-        }
+      validateTransitionTargets({ rules, objectName, field, edge });
+    }
+  }
+};
+
+// ONE-203. One target of one edge is now a place roles can be written, so the
+// two slips a role list can carry are checked there too: an undeclared role
+// key, and the same destination named twice — which, since each target carries
+// its own roles, is the very ambiguity a repeated `from` is refused for one
+// level up.
+const validateTransitionTargets = ({
+  rules,
+  objectName,
+  field,
+  edge,
+}: {
+  rules: OnemaAccessRules;
+  objectName: string;
+  field: string;
+  edge: OnemaTransitionRule;
+}): void => {
+  const seenTargetValues = new Set<OnemaCondition['eq'][1]>();
+
+  for (const target of edge.to) {
+    const targetValue = readOnemaTransitionTargetValue(target);
+
+    if (seenTargetValues.has(targetValue)) {
+      throw new OnemaAccessException(
+        `Onema access rules name "${JSON.stringify(
+          targetValue,
+        )}" twice among the targets of "${objectName}.${field}" from ${JSON.stringify(
+          edge.from,
+        )}`,
+        OnemaAccessExceptionCode.INVALID_RULES,
+      );
+    }
+
+    seenTargetValues.add(targetValue);
+
+    for (const roleKey of readOnemaTransitionTargetRoleKeys({ target, edge })) {
+      if (!isDefined(rules.roles[roleKey])) {
+        throw new OnemaAccessException(
+          `Onema access rules let role "${roleKey}" drive the transition of "${objectName}.${field}" without declaring its role id`,
+          OnemaAccessExceptionCode.INVALID_RULES,
+        );
       }
+    }
+  }
+
+  // An edge whose every target names its own roles never reads the edge's
+  // list, so a role declared nowhere would sit there unnoticed
+  for (const roleKey of edge.roleKeys) {
+    if (!isDefined(rules.roles[roleKey])) {
+      throw new OnemaAccessException(
+        `Onema access rules let role "${roleKey}" drive the transition of "${objectName}.${field}" without declaring its role id`,
+        OnemaAccessExceptionCode.INVALID_RULES,
+      );
     }
   }
 };
@@ -321,6 +383,7 @@ const validateObjectChains = (rules: OnemaAccessRules): void => {
         rules,
         chain: {
           objectPath: [objectName],
+          roleKey,
           maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
         },
         budget: { remainingConditions: ONEMA_MAX_CONDITIONS_PER_RULE },
@@ -345,6 +408,8 @@ const validateWriteParentChains = (rules: OnemaAccessRules): void => {
   )) {
     const chain: ObjectChain = {
       objectPath: [objectName],
+      // No role: the seed is the row being written, and the author's roles are
+      // not known here, so the parent's every role is walked as its own graph
       maxObjectDepth: isOnemaPolymorphicParentSet(parents)
         ? ONEMA_MAX_RULE_DEPTH_THROUGH_POLYMORPHIC_TARGET
         : ONEMA_MAX_RULE_DEPTH,
@@ -370,6 +435,10 @@ type ConditionBudget = { remainingConditions: number };
 // can actually build instead of silently turning into "no rows"
 type ObjectChain = {
   objectPath: string[];
+  // ONE-203 (П17): whose graph this walk is in. Undefined only at the seed of
+  // a write-parent chain, which is a row, not a rule — the first object it
+  // reaches starts one walk per role of that object.
+  roleKey?: string;
   maxObjectDepth: number;
   // See the compiler's state field of the same name: a write-parent walk starts
   // at the row being written, so the parent's rule reaching that object again is
@@ -377,12 +446,23 @@ type ObjectChain = {
   cycleExemptObjectName?: string;
 };
 
-// A reached object brings in the conditions of *every* role, not of the role
-// the walk started from: the compiler ORs the rules of all the roles its
-// subject holds (compile-onema-row-access.util.ts), so a cycle A(role x) →
-// B(role y) → A is a real cycle in the SQL even though no single role closes
-// it. Walking one role at a time would let it through here and turn it into a
-// silent `denied` at compile time instead of a loud refusal at load time.
+// ONE-203 (П17): one graph per role. A reached object contributes the rule of
+// the role the walk is in, and nothing else.
+//
+// Until this, every reached object contributed the rules of *all* roles,
+// because the compiler ORs the rules of every role its subject holds
+// (compile-onema-row-access.util.ts) and a chain mixing two of them is real
+// SQL for a subject holding both. It is real, but it costs nothing: the
+// compiler prunes it to "no rows" at the very hop that closes a circle or
+// spends the depth, leaving the rule it is nested in with everything it had —
+// role x still reaches B, role y still reaches A, and the branch that is lost
+// could only ever have widened a path already granted one level up. The work
+// one row causes is bounded by that same cut in the compiler, not by this
+// walk, so counting the mixture here bought no safety and refused rules that
+// are simply two different ways into one pair of objects:
+// `onemaProjectMember → onemaProject` for the staff and `onemaProject →
+// onemaProjectMember` for the contractor who sees the project only through
+// their own membership row (П17).
 const walkObject = ({
   objectName,
   rules,
@@ -402,12 +482,24 @@ const walkObject = ({
     return;
   }
 
-  for (const condition of Object.values(conditionByRoleKey)) {
+  const roleKeys = isDefined(chain.roleKey)
+    ? [chain.roleKey]
+    : Object.keys(conditionByRoleKey);
+
+  for (const roleKey of roleKeys) {
+    const condition = conditionByRoleKey[roleKey];
+
     if (!isDefined(condition)) {
       continue;
     }
 
-    walkCondition({ condition, rules, chain, budget, describeRule });
+    walkCondition({
+      condition,
+      rules,
+      chain: { ...chain, roleKey },
+      budget,
+      describeRule,
+    });
   }
 };
 

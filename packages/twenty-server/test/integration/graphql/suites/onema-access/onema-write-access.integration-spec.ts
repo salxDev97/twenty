@@ -1978,6 +1978,78 @@ describe('onemaWriteAccess', () => {
       ).toBe('IN_REVIEW');
     });
 
+    // ONE-203: the roles may sit on the pair of from and to. The edge below
+    // hands DRAFT to the role, so a check reading the edge's list would let
+    // both moves through; only reading the target's own list refuses the one
+    // that was never the role's to make.
+    describe('roles named on one pair of from and to', () => {
+      const perTargetTransitionRules = (): OnemaAccessRules => ({
+        application: APPLICATION_UNIVERSAL_IDENTIFIER,
+        roles: { member: memberRoleUniversalIdentifier },
+        objects: { person: { member: { all: true } } },
+        transitions: {
+          person: {
+            field: 'jobTitle',
+            rules: [
+              {
+                from: 'DRAFT',
+                to: ['IN_REVIEW', { value: 'ACCEPTED', roleKeys: [] }],
+                roleKeys: ['member'],
+              },
+            ],
+          },
+        },
+      });
+
+      it('refuses the move the target keeps for the application', async () => {
+        setOnemaAccessRulesForTesting(undefined);
+        await setJobTitleAsAdminForTransitions('DRAFT');
+
+        setOnemaAccessRulesForTesting(perTargetTransitionRules());
+
+        expectForbidden(
+          await makeRequestAsJony(
+            updateOneOperationFactory({
+              objectMetadataSingularName: 'person',
+              gqlFields: 'id jobTitle',
+              recordId: ownedPersonId,
+              data: { jobTitle: 'ACCEPTED' },
+            }),
+          ),
+        );
+
+        expect(
+          (
+            await readBehindTheRules<SeedPerson>({
+              objectMetadataSingularName: 'person',
+              objectMetadataPluralName: 'people',
+              gqlFields: 'id jobTitle',
+              filter: { id: { eq: ownedPersonId } },
+            })
+          )[0].jobTitle,
+        ).toBe('DRAFT');
+      });
+
+      it('lets the same role make the move whose target names nobody of its own', async () => {
+        setOnemaAccessRulesForTesting(undefined);
+        await setJobTitleAsAdminForTransitions('DRAFT');
+
+        setOnemaAccessRulesForTesting(perTargetTransitionRules());
+
+        const submission = await makeRequestAsJony(
+          updateOneOperationFactory({
+            objectMetadataSingularName: 'person',
+            gqlFields: 'id jobTitle',
+            recordId: ownedPersonId,
+            data: { jobTitle: 'IN_REVIEW' },
+          }),
+        );
+
+        expect(submission.body.errors).toBeUndefined();
+        expect(submission.body.data.updatePerson.jobTitle).toBe('IN_REVIEW');
+      });
+    });
+
     // A value the graph never names in `from` has no edge at all, which is the
     // fail-closed default rather than a typo quietly opening every move
     it('refuses any move out of a status the graph does not know as a starting point', async () => {
