@@ -335,6 +335,51 @@ describe('parseOnemaAccessRules', () => {
     expect(parseOnemaAccessRules(rules)).toEqual(rules);
   });
 
+  // Depth is counted in the same graph as a circle. The chain below is three
+  // objects for the contractor and three for the staff, and only stringing one
+  // role's rule onto the other's makes it four — which no participant holding
+  // a single role ever asks the database for.
+  it('counts depth in the graph of one role, not across the roles a chain passes', () => {
+    const rules = {
+      roles: {
+        sales: SALES_ROLE_UNIVERSAL_IDENTIFIER,
+        ceo: CEO_ROLE_UNIVERSAL_IDENTIFIER,
+      },
+      requiredObjects: [],
+      writeProtectedFields: {},
+      writeRequiresParentAccess: {},
+      freezeWhen: {},
+      writeFrozenByParent: {},
+      transitions: {},
+      objects: {
+        company: {
+          ceo: {
+            exists: { object: 'onemaProject', backForeignKey: 'company' },
+          },
+        },
+        onemaProject: {
+          ceo: { eq: ['projectManager', '$me'] },
+          sales: {
+            exists: {
+              object: 'onemaProjectMember',
+              backForeignKey: 'project',
+              where: {
+                parent: { foreignKey: 'person', object: 'onemaPerson' },
+              },
+            },
+          },
+        },
+        onemaProjectMember: {
+          ceo: { parent: { foreignKey: 'project', object: 'onemaProject' } },
+          sales: { parent: { foreignKey: 'person', object: 'onemaPerson' } },
+        },
+        onemaPerson: { sales: { eq: ['workspaceMember', '$me'] } },
+      },
+    };
+
+    expect(parseOnemaAccessRules(rules)).toEqual(rules);
+  });
+
   // The role's own graph is still walked whole: a circle one role closes by
   // itself is the unbounded join it always was, whatever the other roles do
   it('still rejects a cycle one role closes on its own while another reaches the same objects', () => {

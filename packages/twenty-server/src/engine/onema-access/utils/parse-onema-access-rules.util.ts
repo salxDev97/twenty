@@ -383,7 +383,6 @@ const validateObjectChains = (rules: OnemaAccessRules): void => {
         rules,
         chain: {
           objectPath: [objectName],
-          roleObjectPath: [objectName],
           roleKey,
           maxObjectDepth: ONEMA_MAX_RULE_DEPTH,
         },
@@ -409,9 +408,8 @@ const validateWriteParentChains = (rules: OnemaAccessRules): void => {
   )) {
     const chain: ObjectChain = {
       objectPath: [objectName],
-      // The seed is the row being written, which is nobody's rule: the first
-      // rule the walk meets is the parent's, and its own graph starts there
-      roleObjectPath: [objectName],
+      // No role: the seed is the row being written, and the author's roles are
+      // not known here, so the parent's every role is walked as its own graph
       maxObjectDepth: isOnemaPolymorphicParentSet(parents)
         ? ONEMA_MAX_RULE_DEPTH_THROUGH_POLYMORPHIC_TARGET
         : ONEMA_MAX_RULE_DEPTH,
@@ -437,9 +435,9 @@ type ConditionBudget = { remainingConditions: number };
 // can actually build instead of silently turning into "no rows"
 type ObjectChain = {
   objectPath: string[];
-  // ONE-203 (П17): the objects reached through the rules of *one* role, which
-  // is the graph a cycle is counted in. See walkObject.
-  roleObjectPath: string[];
+  // ONE-203 (П17): whose graph this walk is in. Undefined only at the seed of
+  // a write-parent chain, which is a row, not a rule — the first object it
+  // reaches starts one walk per role of that object.
   roleKey?: string;
   maxObjectDepth: number;
   // See the compiler's state field of the same name: a write-parent walk starts
@@ -448,21 +446,23 @@ type ObjectChain = {
   cycleExemptObjectName?: string;
 };
 
-// A reached object brings in the conditions of *every* role, not of the role
-// the walk started from: the compiler ORs the rules of all the roles its
-// subject holds (compile-onema-row-access.util.ts), so the chain the depth
-// limit measures runs across roles too.
+// ONE-203 (П17): one graph per role. A reached object contributes the rule of
+// the role the walk is in, and nothing else.
 //
-// The circle each of them may close, though, is its own. A chain that no
-// single role closes — `A (role x) → B (role y) → A` — only exists for a
-// subject holding both, and the compiler prunes it to "no rows" at the hop
-// that closes it, leaving the rule it is nested in with everything it had:
+// Until this, every reached object contributed the rules of *all* roles,
+// because the compiler ORs the rules of every role its subject holds
+// (compile-onema-row-access.util.ts) and a chain mixing two of them is real
+// SQL for a subject holding both. It is real, but it costs nothing: the
+// compiler prunes it to "no rows" at the very hop that closes a circle or
+// spends the depth, leaving the rule it is nested in with everything it had —
 // role x still reaches B, role y still reaches A, and the branch that is lost
-// could only ever have widened a path already granted one level up. Counting
-// such a chain as a cycle of the file refused rules that are simply two
-// different ways into the same pair of objects — `onemaProjectMember →
-// onemaProject` for the staff and `onemaProject → onemaProjectMember` for the
-// contractor who sees the project only through their own membership row (П17).
+// could only ever have widened a path already granted one level up. The work
+// one row causes is bounded by that same cut in the compiler, not by this
+// walk, so counting the mixture here bought no safety and refused rules that
+// are simply two different ways into one pair of objects:
+// `onemaProjectMember → onemaProject` for the staff and `onemaProject →
+// onemaProjectMember` for the contractor who sees the project only through
+// their own membership row (П17).
 const walkObject = ({
   objectName,
   rules,
@@ -482,7 +482,13 @@ const walkObject = ({
     return;
   }
 
-  for (const [roleKey, condition] of Object.entries(conditionByRoleKey)) {
+  const roleKeys = isDefined(chain.roleKey)
+    ? [chain.roleKey]
+    : Object.keys(conditionByRoleKey);
+
+  for (const roleKey of roleKeys) {
+    const condition = conditionByRoleKey[roleKey];
+
     if (!isDefined(condition)) {
       continue;
     }
@@ -490,28 +496,12 @@ const walkObject = ({
     walkCondition({
       condition,
       rules,
-      chain: enterRole({ chain, objectName, roleKey }),
+      chain: { ...chain, roleKey },
       budget,
       describeRule,
     });
   }
 };
-
-// The rule of another role is another graph. It is still reached from here, so
-// it keeps counting towards the depth of the work one row causes, but the
-// circle it can close starts at this object.
-const enterRole = ({
-  chain,
-  objectName,
-  roleKey,
-}: {
-  chain: ObjectChain;
-  objectName: string;
-  roleKey: string;
-}): ObjectChain =>
-  chain.roleKey === roleKey
-    ? chain
-    : { ...chain, roleKey, roleObjectPath: [objectName] };
 
 const walkCondition = ({
   condition,
@@ -561,10 +551,6 @@ const walkCondition = ({
       chain,
       describeRule,
     });
-
-    if (!isDefined(nextChain)) {
-      return;
-    }
 
     walkObject({
       objectName: condition.exists.object,
@@ -638,15 +624,14 @@ const walkTarget = ({
   chain: ObjectChain;
   budget: ConditionBudget;
   describeRule: string;
-}): void => {
-  const nextChain = enterObject({ objectName, chain, describeRule });
-
-  if (!isDefined(nextChain)) {
-    return;
-  }
-
-  walkObject({ objectName, rules, chain: nextChain, budget, describeRule });
-};
+}): void =>
+  walkObject({
+    objectName,
+    rules,
+    chain: enterObject({ objectName, chain, describeRule }),
+    budget,
+    describeRule,
+  });
 
 const widenChainForPolymorphicTarget = (chain: ObjectChain): ObjectChain => ({
   ...chain,
@@ -656,9 +641,6 @@ const widenChainForPolymorphicTarget = (chain: ObjectChain): ObjectChain => ({
   ),
 });
 
-// Undefined is not "fine": it is the one hop the compiler itself refuses to
-// take, and the walk stops where the compiler stops rather than following a
-// chain no SQL will ever carry (see walkObject).
 const enterObject = ({
   objectName,
   chain,
@@ -667,23 +649,7 @@ const enterObject = ({
   objectName: string;
   chain: ObjectChain;
   describeRule: string;
-}): ObjectChain | undefined => {
-  if (
-    closesOnemaRuleCycle({
-      objectPath: chain.roleObjectPath,
-      objectName,
-      cycleExemptObjectName: chain.cycleExemptObjectName,
-    })
-  ) {
-    throw new OnemaAccessException(
-      `Onema access rules form a cycle reachable from object ${describeRule}: ${[
-        ...chain.roleObjectPath,
-        objectName,
-      ].join(' -> ')}`,
-      OnemaAccessExceptionCode.INVALID_RULES,
-    );
-  }
-
+}): ObjectChain => {
   if (
     closesOnemaRuleCycle({
       objectPath: chain.objectPath,
@@ -691,7 +657,13 @@ const enterObject = ({
       cycleExemptObjectName: chain.cycleExemptObjectName,
     })
   ) {
-    return undefined;
+    throw new OnemaAccessException(
+      `Onema access rules form a cycle reachable from object ${describeRule}: ${[
+        ...chain.objectPath,
+        objectName,
+      ].join(' -> ')}`,
+      OnemaAccessExceptionCode.INVALID_RULES,
+    );
   }
 
   const objectPath = [...chain.objectPath, objectName];
@@ -705,9 +677,5 @@ const enterObject = ({
     );
   }
 
-  return {
-    ...chain,
-    objectPath,
-    roleObjectPath: [...chain.roleObjectPath, objectName],
-  };
+  return { ...chain, objectPath };
 };
