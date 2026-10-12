@@ -764,7 +764,7 @@ msgstr "Сбой выполнения шага агента."
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-agent-chat-thread-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.description"
 msgid "Agent step of the workflow run that held this conversation"
-msgstr ""
+msgstr "Шаг-агент запуска рабочего процесса, которому принадлежит этот чат"
 
 #. js-lingui-id: fX04ru
 #: src/engine/workspace-manager/twenty-standard-application/utils/object-metadata/create-standard-flat-object-metadata.util.ts
@@ -1098,7 +1098,7 @@ msgstr "ID приложения"
 #. js-lingui-id: ue106l
 #: src/engine/core-modules/application/application.exception.ts
 msgid "Application is not installed in this workspace. Install it first."
-msgstr ""
+msgstr "Приложение не установлено в этом рабочем пространстве. Сначала установите его."
 
 #. js-lingui-id: t77Ey9
 #: src/engine/core-modules/public-domain/public-domain.exception.ts
@@ -1143,7 +1143,7 @@ msgstr "Функция логики удаления приложения зав
 #. js-lingui-id: QtRMs/
 #: src/engine/core-modules/application/application.exception.ts
 msgid "Application upgrade failed."
-msgstr ""
+msgstr "Не удалось обновить приложение."
 
 #. js-lingui-id: 5MJQ4s
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-application-variable-validator.service.ts
@@ -2363,7 +2363,7 @@ msgstr "Ветка чата не найдена."
 #. js-lingui-id: eLQjKW
 #: src/engine/metadata-modules/ai/ai.exception.ts
 msgid "Chat thread title cannot be empty."
-msgstr ""
+msgstr "Название чата не может быть пустым."
 
 #. js-lingui-id: lZ6AwB
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-workspace-member-standard-flat-field-metadata.util.ts
@@ -2910,13 +2910,13 @@ msgstr "Размер диалога"
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-workflow-run-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.label"
 msgid "Conversations"
-msgstr ""
+msgstr "Чаты"
 
 #. js-lingui-id: z+qran
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-workflow-run-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.description"
 msgid "Conversations held by the run's agent steps"
-msgstr ""
+msgstr "Чаты, которые вели шаги-агенты этого запуска"
 
 #. js-lingui-id: X/ryFh
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-workflow-run-standard-flat-field-metadata.util.ts
@@ -3952,7 +3952,7 @@ msgstr "Электронная почта"
 #. js-lingui-id: AcnTuz
 #: src/engine/core-modules/user/services/user.service.ts
 msgid "Email already in use"
-msgstr ""
+msgstr "Этот адрес почты уже занят"
 
 #. js-lingui-id: BBXuRb
 #: src/engine/core-modules/email-verification/email-verification-exception-filter.util.ts
@@ -3974,7 +3974,7 @@ msgstr "Позиция записи email-кампании"
 #. js-lingui-id: LT5dFi
 #: src/engine/core-modules/user/services/user.service.ts
 msgid "Email can only be updated when you belong to a single workspace."
-msgstr ""
+msgstr "Адрес почты можно сменить, только если вы состоите в одном рабочем пространстве."
 
 #. js-lingui-id: MYgdAv
 #: src/engine/core-modules/emailing-domain/drivers/exceptions/emailing-domain-driver.exception.ts
@@ -4394,7 +4394,7 @@ msgstr "Сбой построения зависимостей функции."
 #. js-lingui-id: E7Dsiq
 #: src/engine/metadata-modules/ai/ai-agent-monitor/resolvers/agent-turn.resolver.ts
 msgid "Failed to create evaluation. Please try again."
-msgstr ""
+msgstr "Не удалось создать оценку. Попробуйте ещё раз."
 
 #. js-lingui-id: RjuW0j
 #: src/engine/metadata-modules/front-component/front-component.exception.ts
@@ -4536,12 +4536,12 @@ msgstr "Поле не может быть проиндексировано, та
 #. js-lingui-id: e2V+x1
 #: src/engine/metadata-modules/flat-object-metadata/validators/utils/validate-flat-object-metadata-identifiers.util.ts
 msgid "Field cannot be used as label identifier due to its type"
-msgstr ""
+msgstr "Поле нельзя сделать подписью записи из-за его типа"
 
 #. js-lingui-id: QMSXe6
 #: src/engine/metadata-modules/flat-object-metadata/validators/utils/validate-flat-object-metadata-identifiers.util.ts
 msgid "Field cannot be used as label identifier due to its type: should be of type UUID, text or full name"
-msgstr ""
+msgstr "Поле нельзя сделать подписью записи из-за его типа: нужен тип UUID, текст или полное имя"
 
 #. js-lingui-id: F6OLoA
 #: src/engine/metadata-modules/flat-object-metadata/validators/utils/validate-flat-object-metadata-identifiers.util.ts
@@ -4690,7 +4690,7 @@ msgstr "Поле для обновления метадаты объекта н�
 #. js-lingui-id: stY5BO
 #: src/engine/metadata-modules/flat-field-metadata/services/flat-field-metadata-type-validator.service.ts
 msgid "Field type NUMERIC is not supported. Use Number instead."
-msgstr ""
+msgstr "Тип поля NUMERIC не поддерживается — используйте «Число»."
 
 #. js-lingui-id: p6JTHU
 #: src/engine/metadata-modules/flat-field-metadata/validators/utils/validate-position-flat-field-metadata.util.ts
@@ -6105,7 +6105,7 @@ msgstr "Недействительная полезная нагрузка со�
 #: src/engine/metadata-modules/flat-field-metadata/validators/utils/validate-morph-or-relation-flat-field-metadata.util.ts
 #: src/engine/metadata-modules/flat-field-metadata/validators/utils/validate-morph-relation-flat-field-metadata.util.ts
 msgid "Invalid relation field target"
-msgstr ""
+msgstr "Неверная цель поля связи"
 
 #. js-lingui-id: lOyHVQ
 #: src/engine/core-modules/record-crud/exceptions/record-crud.exception.ts
@@ -6405,7 +6405,7 @@ msgstr "Недопустимый статус рабочего процесса.
 #. js-lingui-id: v+ozTr
 #: src/modules/workflow/workflow-executor/exceptions/workflow-step-executor.exception.ts
 msgid "Invalid workflow step input."
-msgstr ""
+msgstr "Неверные входные данные шага рабочего процесса."
 
 #. js-lingui-id: GRz5NM
 #: src/modules/workflow/common/exceptions/workflow-version-step.exception.ts
@@ -6850,13 +6850,13 @@ msgstr "Кешированное имя связанной записи"
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-timeline-activity-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.description"
 msgid "Linked Record id"
-msgstr "Id связанной записи"
+msgstr "ID связанной записи"
 
 #. js-lingui-id: wj0hmG
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-timeline-activity-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.label"
 msgid "Linked Record id"
-msgstr "Id связанной записи"
+msgstr "ID связанной записи"
 
 #. js-lingui-id: z+srLp
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-company-standard-flat-field-metadata.util.ts
@@ -7469,13 +7469,13 @@ msgstr "Цепочки сообщений, связанные с возможн�
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-timeline-activity-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.label"
 msgid "MessageCampaign"
-msgstr "MessageCampaign"
+msgstr "Кампания"
 
 #. js-lingui-id: j5w8z0
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-timeline-activity-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.label"
 msgid "MessageList"
-msgstr "MessageList"
+msgstr "Список рассылки"
 
 #. js-lingui-id: bDTY0A
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-agent-chat-thread-standard-flat-field-metadata.util.ts
@@ -7636,7 +7636,7 @@ msgstr "Имя \"{name}\" недоступно, так как уже испол�
 #. js-lingui-id: dBDpp2
 #: src/engine/metadata-modules/flat-field-metadata/validators/utils/validate-flat-field-metadata-name-availability.util.ts
 msgid "Name \"{name}\" is not available as it is already used by join column name"
-msgstr ""
+msgstr "Имя «{name}» занято: так называется колонка связи"
 
 #. js-lingui-id: Aam+mb
 #: src/engine/metadata-modules/utils/exceptions/invalid-metadata.exception.ts
@@ -7759,7 +7759,7 @@ msgstr "Новый"
 #. js-lingui-id: TYhxR+
 #: src/engine/core-modules/user/services/user.service.ts
 msgid "New email must be different from current email"
-msgstr ""
+msgstr "Новый адрес почты должен отличаться от текущего"
 
 #. js-lingui-id: 1UzENP
 #: src/modules/dashboard/chart-data/utils/format-dimension-value.util.ts
@@ -9006,7 +9006,7 @@ msgstr "Пожалуйста, выберите дату и время оконч
 #. js-lingui-id: mqzu5F
 #: src/engine/core-modules/email-verification/services/email-verification.service.ts
 msgid "Please confirm your updated email"
-msgstr ""
+msgstr "Подтвердите новый адрес почты"
 
 #. js-lingui-id: Zm9s4F
 #: src/engine/api/common/common-args-processors/data-arg-processor/validator-utils/validate-links-field-or-throw.util.ts
@@ -9100,7 +9100,7 @@ msgstr "Позиция"
 #. js-lingui-id: c7uZDh
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-page-layout-widget-validator.service.ts
 msgid "Position layoutMode \"{layoutMode}\" does not match tab layoutMode \"{tabLayoutMode}\""
-msgstr ""
+msgstr "Режим раскладки позиции «{layoutMode}» не совпадает с режимом раскладки вкладки «{tabLayoutMode}»"
 
 #. js-lingui-id: rFj1tD
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-navigation-menu-item-validator.service.ts
@@ -9221,7 +9221,7 @@ msgstr "Промпт не может быть пустым"
 #. js-lingui-id: OTJNm9
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/utils/validate-role-required-properties-are-defined.util.ts
 msgid "Property {property} is required for role"
-msgstr ""
+msgstr "Для роли обязательно свойство {property}"
 
 #. js-lingui-id: IBJ/4j
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-opportunity-standard-flat-field-metadata.util.ts
@@ -9453,13 +9453,13 @@ msgstr "Предоставления доступа к записям"
 #. js-lingui-id: LVUF8D
 #: src/engine/metadata-modules/view/services/view-widget-upsert.service.ts
 msgid "Record table widget has no associated view"
-msgstr ""
+msgstr "У виджета таблицы записей нет вида"
 
 #. js-lingui-id: KnnILY
 #: src/engine/metadata-modules/view/services/view-widget-upsert.service.ts
 #: src/engine/metadata-modules/view/services/view-widget-upsert.service.ts
 msgid "Record table widget not found"
-msgstr ""
+msgstr "Виджет таблицы записей не найден"
 
 #. js-lingui-id: IJawMp
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-agent-chat-thread-standard-flat-field-metadata.util.ts
@@ -9826,19 +9826,19 @@ msgstr "Роль"
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/utils/validate-flat-role-target-assignation-availability.util.ts
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/utils/validate-flat-role-target-assignation-availability.util.ts
 msgid "Role \"{roleLabel}\" cannot be assigned to agents"
-msgstr ""
+msgstr "Роль «{roleLabel}» нельзя назначить агентам"
 
 #. js-lingui-id: u1Fm8i
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/utils/validate-flat-role-target-assignation-availability.util.ts
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/utils/validate-flat-role-target-assignation-availability.util.ts
 msgid "Role \"{roleLabel}\" cannot be assigned to API keys"
-msgstr ""
+msgstr "Роль «{roleLabel}» нельзя назначить ключам API"
 
 #. js-lingui-id: 9ZQkou
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/utils/validate-flat-role-target-assignation-availability.util.ts
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/utils/validate-flat-role-target-assignation-availability.util.ts
 msgid "Role \"{roleLabel}\" cannot be assigned to users"
-msgstr ""
+msgstr "Роль «{roleLabel}» нельзя назначить пользователям"
 
 #. js-lingui-id: ViBevc
 #: src/engine/metadata-modules/role/exceptions/role-target.exception.ts
@@ -9898,7 +9898,7 @@ msgstr "Неверное имя роли"
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-row-level-permission-predicate-validator.service.ts
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-row-level-permission-predicate-validator.service.ts
 msgid "Role not found"
-msgstr ""
+msgstr "Роль не найдена"
 
 #. js-lingui-id: /BTyf+
 #: src/engine/metadata-modules/ai/ai.exception.ts
@@ -9942,7 +9942,7 @@ msgstr "Цель роли должна содержать ровно один и
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-role-target-validator.service.ts
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-role-target-validator.service.ts
 msgid "Role target not found"
-msgstr ""
+msgstr "Назначение роли не найдено"
 
 #. js-lingui-id: gz6uii
 #: src/engine/metadata-modules/role/exceptions/role-target.exception.ts
@@ -10198,7 +10198,7 @@ msgstr "Поиск по Центру поддержки"
 #. js-lingui-id: PdVIJC
 #: src/engine/metadata-modules/search-field-metadata/constants/search-vector-field.constants.ts
 msgid "Search vector"
-msgstr ""
+msgstr "Поисковый вектор"
 
 #. js-lingui-id: Zuw7oP
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
@@ -10233,7 +10233,7 @@ msgstr ""
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-workspace-member-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.label"
 msgid "Search vector"
-msgstr ""
+msgstr "Поисковый вектор"
 
 #. js-lingui-id: jyicIO
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-search-field-metadata-validator.service.ts
@@ -10774,7 +10774,7 @@ msgstr "Идентификатор источника"
 #. js-lingui-id: OmgwCE
 #: src/engine/metadata-modules/flat-field-metadata/validators/utils/validate-morph-relation-flat-field-metadata.util.ts
 msgid "Source object cannot be the target object"
-msgstr ""
+msgstr "Исходный объект не может быть целевым"
 
 #. js-lingui-id: pdLYF5
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-agent-message-part-standard-flat-field-metadata.util.ts
@@ -12133,7 +12133,7 @@ msgstr "Это соединение не разрешено."
 #. js-lingui-id: 4GicxZ
 #: src/engine/metadata-modules/ai/ai.exception.ts
 msgid "This conversation belongs to a workflow run and can only be read."
-msgstr ""
+msgstr "Этот чат принадлежит запуску рабочего процесса — его можно только читать."
 
 #. js-lingui-id: y3SNqs
 #: src/engine/metadata-modules/ai/ai.exception.ts
@@ -12348,7 +12348,7 @@ msgstr "Это имя недоступно."
 #: src/engine/metadata-modules/flat-field-metadata/validators/utils/validate-flat-field-metadata-name.util.ts
 #: src/engine/metadata-modules/flat-object-metadata/validators/utils/validate-flat-object-metadata-name.util.ts
 msgid "This name is reserved. Use a different name or the system will add \"Custom\" suffix."
-msgstr ""
+msgstr "Это имя зарезервировано. Выберите другое, иначе система добавит окончание «Custom»."
 
 #. js-lingui-id: /mGcny
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/utils/validate-flat-view-creation.util.ts
@@ -12918,7 +12918,7 @@ msgstr "Слишком много запросов. Пожалуйста, поп
 #. js-lingui-id: mfqtz7
 #: src/engine/core-modules/workspace-invitation/services/workspace-invitation.service.ts
 msgid "Too many workspace invitations sent. Please try again later."
-msgstr ""
+msgstr "Отправлено слишком много приглашений. Попробуйте позже."
 
 #. js-lingui-id: GT/+KO
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-agent-message-part-standard-flat-field-metadata.util.ts
@@ -14185,12 +14185,12 @@ msgstr "Поведение высоты виджета не поддержива
 #. js-lingui-id: +9R1ka
 #: src/engine/metadata-modules/page-layout-widget/utils/validate-page-layout-widget-vertical-list-position.util.ts
 msgid "Widget index must be a non-negative integer"
-msgstr ""
+msgstr "Номер виджета должен быть целым неотрицательным числом"
 
 #. js-lingui-id: znCTbL
 #: src/engine/metadata-modules/page-layout-widget/utils/validate-page-layout-widget-vertical-list-position.util.ts
 msgid "Widget index must be an integer"
-msgstr ""
+msgstr "Номер виджета должен быть целым числом"
 
 #. js-lingui-id: 09IBNJ
 #: src/modules/dashboard/chart-data/exceptions/chart-data.exception.ts
@@ -14200,7 +14200,7 @@ msgstr "Виджет не найден."
 #. js-lingui-id: MPdWmx
 #: src/engine/workspace-manager/workspace-migration/workspace-migration-builder/validators/services/flat-page-layout-widget-validator.service.ts
 msgid "Widget position type must match the tab layout mode"
-msgstr ""
+msgstr "Тип позиции виджета должен совпадать с режимом раскладки вкладки"
 
 #. js-lingui-id: D5gHL1
 #: src/engine/metadata-modules/page-layout-widget/utils/validate-page-layout-widget-grid-position.util.ts
@@ -14326,7 +14326,7 @@ msgstr "Корневой шаг рабочего процесса не найд�
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-agent-chat-thread-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.label"
 msgid "Workflow Run"
-msgstr ""
+msgstr "Запуск рабочего процесса"
 
 #. js-lingui-id: hqdwCt
 #: src/engine/workspace-manager/twenty-standard-application/utils/object-metadata/create-standard-flat-object-metadata.util.ts
@@ -14402,7 +14402,7 @@ msgstr "Статус запуска рабочего процесса"
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-agent-chat-thread-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.description"
 msgid "Workflow run whose agent step held this conversation"
-msgstr ""
+msgstr "Запуск рабочего процесса, чей шаг-агент вёл этот чат"
 
 #. js-lingui-id: Tinlvs
 #: src/engine/workspace-manager/twenty-standard-application/utils/object-metadata/create-standard-flat-object-metadata.util.ts
@@ -14426,7 +14426,7 @@ msgstr "Запуски рабочего процесса, связанные с 
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-agent-chat-thread-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.label"
 msgid "Workflow Step ID"
-msgstr ""
+msgstr "ID шага рабочего процесса"
 
 #. js-lingui-id: dD9Vpa
 #: src/modules/workflow/common/exceptions/workflow-version-step.exception.ts
@@ -14581,7 +14581,7 @@ msgstr "Рабочий процесс автоматического тригг�
 #: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/compute-timeline-activity-standard-flat-field-metadata.util.ts
 msgctxt "fieldMetadata.label"
 msgid "WorkflowRun"
-msgstr "WorkflowRun"
+msgstr "Запуск рабочего процесса"
 
 #. js-lingui-id: zSsbOe
 #: src/engine/workspace-manager/twenty-standard-application/constants/standard-navigation-menu-item.constant.ts
@@ -14899,7 +14899,7 @@ msgstr "Да"
 #. js-lingui-id: 3N5PgZ
 #: src/engine/metadata-modules/logic-function/logic-function.exception.ts
 msgid "You are not allowed to access this function."
-msgstr ""
+msgstr "У вас нет доступа к этой функции."
 
 #. js-lingui-id: chHKg8
 #: src/engine/subscriptions/event-stream.exception.ts
@@ -14930,7 +14930,7 @@ msgstr "Вы можете обновлять за один раз только �
 #: src/engine/twenty-orm/repository/workspace-repository.ts
 #: src/engine/twenty-orm/repository/workspace-repository.ts
 msgid "You can only update up to {QUERY_MAX_RECORDS} records at once."
-msgstr ""
+msgstr "За один раз можно обновить не больше {QUERY_MAX_RECORDS} записей."
 
 #. js-lingui-id: 1SQnFB
 #: src/engine/metadata-modules/user-role/user-role.service.ts
@@ -15191,3 +15191,206 @@ msgstr "Ваше рабочее пространство было обновле
 #: src/engine/workspace-manager/workspace-cleaner/services/cleaner.workspace-service.ts
 msgid "Your workspace is paused — reactivate to keep your data"
 msgstr "Ваше рабочее пространство приостановлено — активируйте его, чтобы сохранить данные"
+
+#. js-lingui-id: okfXhQ
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Archived at"
+msgstr "Архивировано"
+
+#. js-lingui-id: 66wSGr
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Assigned chat threads"
+msgstr "Назначенные чаты"
+
+#. js-lingui-id: Z6TS/W
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Authored template URL"
+msgstr "Шаблон адреса ссылки"
+
+#. js-lingui-id: YIsqqp
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Cache Creation Tokens"
+msgstr "Токены записи в кеш"
+
+#. js-lingui-id: Iwbkq0
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Cache Read Tokens"
+msgstr "Токены чтения из кеша"
+
+#. js-lingui-id: sTkIAU
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Chat thread participations"
+msgstr "Участие в чатах"
+
+#. js-lingui-id: AmBiAv
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Error"
+msgstr "Ошибка"
+
+#. js-lingui-id: Ca4seM
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Input Credits"
+msgstr "Входящие кредиты"
+
+#. js-lingui-id: qUpYTQ
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Input Tokens"
+msgstr "Входящие токены"
+
+#. js-lingui-id: pPtB+n
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last activity"
+msgstr "Последняя активность"
+
+#. js-lingui-id: 6BLB1j
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last mentioned at"
+msgstr "Последнее упоминание"
+
+#. js-lingui-id: XIwvdi
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last message sender"
+msgstr "Автор последнего сообщения"
+
+#. js-lingui-id: 98c5Xs
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last message"
+msgstr "Последнее сообщение"
+
+#. js-lingui-id: R2LOsP
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last read at"
+msgstr "Последнее прочтение"
+
+#. js-lingui-id: yrTsg9
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Model ID"
+msgstr "ID модели"
+
+#. js-lingui-id: Vexcon
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Output Credits"
+msgstr "Исходящие кредиты"
+
+#. js-lingui-id: FjWz1Z
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Output Tokens"
+msgstr "Исходящие токены"
+
+#. js-lingui-id: vTA2Ms
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Participants"
+msgstr "Участники"
+
+#. js-lingui-id: pvmev1
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Resolved destination URL"
+msgstr "Итоговый адрес перехода"
+
+#. js-lingui-id: Q/HVbF
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Snoozed until"
+msgstr "Отложено до"
+
+#. js-lingui-id: lnqIRm
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Subscribed"
+msgstr "Подписан"
+
+#. js-lingui-id: nuuwhl
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Template and resolved URL hash"
+msgstr "Хеш шаблона и итогового адреса"
+
+#. js-lingui-id: yxN9Xx
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Writers"
+msgstr "Кто может писать"
+
+#. js-lingui-id: dkKfLP
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelSingular"
+msgid "Chat thread participant"
+msgstr "Участник чата"
+
+#. js-lingui-id: iCLf0Y
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelPlural"
+msgid "Chat thread participants"
+msgstr "Участники чата"
+
+#. js-lingui-id: ApLkPY
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelSingular"
+msgid "Chat"
+msgstr "Чат"
+
+#. js-lingui-id: 68T2AN
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelPlural"
+msgid "Chats"
+msgstr "Чаты"
+
+#. js-lingui-id: K9lEbt
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelSingular"
+msgid "Short link"
+msgstr "Короткая ссылка"
+
+#. js-lingui-id: Cftw//
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelPlural"
+msgid "Short links"
+msgstr "Короткие ссылки"
