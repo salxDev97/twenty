@@ -11,7 +11,10 @@ import { resolve } from 'path';
 // eslint-disable-next-line no-restricted-imports
 import { generateMessageId } from 'twenty-shared/i18n';
 
-import { parsePoCatalog, type PoEntry } from 'src/engine/core-modules/i18n/onema/parse-po-catalog.util';
+import {
+  parsePoCatalog,
+  type PoEntry,
+} from 'src/engine/core-modules/i18n/onema/parse-po-catalog.util';
 import {
   RU_LOCALE_ALLOWED_LATIN_WORDS,
   RU_LOCALE_METADATA_CONTEXTS,
@@ -44,7 +47,8 @@ const CATALOGS = [
   },
 ];
 
-const readCatalog = (path: string): PoEntry[] => parsePoCatalog(readFileSync(path, 'utf8'));
+const readCatalog = (path: string): PoEntry[] =>
+  parsePoCatalog(readFileSync(path, 'utf8'));
 
 const readCompiledMessages = (path: string): Record<string, unknown> => {
   const source = readFileSync(path, 'utf8');
@@ -70,80 +74,95 @@ const hasLatin = (value: string): boolean => /[A-Za-z]/.test(value);
 const findCompiledValue = (
   messages: Record<string, unknown>,
   entry: PoEntry,
-): unknown => messages[generateMessageId(entry.msgId, entry.context ?? '')] ?? messages[entry.msgId];
+): unknown =>
+  messages[generateMessageId(entry.msgId, entry.context ?? '')] ??
+  messages[entry.msgId];
 
 const describeEntry = (entry: PoEntry): string =>
   `[${entry.context ?? 'без контекста'}] «${entry.msgId}» → «${entry.msgStr}» (${entry.reference ?? 'без ссылки'})`;
 
-describe.each(CATALOGS)('ONE-107: русский каталог $name', ({ po, compiled }) => {
-  const entries = readCatalog(po);
+describe.each(CATALOGS)(
+  'ONE-107: русский каталог $name',
+  ({ po, compiled }) => {
+    const entries = readCatalog(po);
 
-  it('каталог прочитан и не пуст', () => {
-    expect(entries.length).toBeGreaterThan(50);
-  });
+    it('каталог прочитан и не пуст', () => {
+      expect(entries.length).toBeGreaterThan(50);
+    });
 
-  it('нет пустых переводов, кроме кодов и псевдонимов из списка исключений', () => {
-    const empty = entries
-      .filter((entry) => entry.msgStr === '')
-      .filter((entry) => !RU_LOCALE_UNTRANSLATED_BY_DESIGN.has(entry.msgId))
-      .map(describeEntry);
+    it('нет пустых переводов, кроме кодов и псевдонимов из списка исключений', () => {
+      const empty = entries
+        .filter((entry) => entry.msgStr === '')
+        .filter((entry) => !RU_LOCALE_UNTRANSLATED_BY_DESIGN.has(entry.msgId))
+        .map(describeEntry);
 
-    expect(empty).toEqual([]);
-  });
+      expect(empty).toEqual([]);
+    });
 
-  it('перевод не повторяет английский исходник, кроме брендов, кодов и примеров', () => {
-    const untranslated = entries
-      .filter((entry) => entry.msgStr !== '' && entry.msgStr === entry.msgId)
-      .filter((entry) => hasLatin(entry.msgStr))
-      // Строка из одних подстановок переводить нечего: `{a} {b}` и так
-      // одинаков на всех языках.
-      .filter((entry) => hasLatin(entry.msgStr.replace(/\{[^}]*\}/g, ' ')))
-      .filter((entry) => !RU_LOCALE_UNTRANSLATED_BY_DESIGN.has(entry.msgId))
-      .map(describeEntry);
+    it('перевод не повторяет английский исходник, кроме брендов, кодов и примеров', () => {
+      const untranslated = entries
+        .filter((entry) => entry.msgStr !== '' && entry.msgStr === entry.msgId)
+        .filter((entry) => hasLatin(entry.msgStr))
+        // Строка из одних подстановок переводить нечего: `{a} {b}` и так
+        // одинаков на всех языках.
+        .filter((entry) => hasLatin(entry.msgStr.replace(/\{[^}]*\}/g, ' ')))
+        .filter((entry) => !RU_LOCALE_UNTRANSLATED_BY_DESIGN.has(entry.msgId))
+        .map(describeEntry);
 
-    expect(untranslated).toEqual([]);
-  });
+      expect(untranslated).toEqual([]);
+    });
 
-  it('в подписях объектов и полей нет латиницы, кроме списка слов-исключений', () => {
-    const allowed = new Set(RU_LOCALE_ALLOWED_LATIN_WORDS.map((word) => word.toLowerCase()));
+    it('в подписях объектов и полей нет латиницы, кроме списка слов-исключений', () => {
+      const allowed = new Set(
+        RU_LOCALE_ALLOWED_LATIN_WORDS.map((word) => word.toLowerCase()),
+      );
 
-    const offenders = entries
-      .filter((entry) => entry.context !== null && RU_LOCALE_METADATA_CONTEXTS.includes(entry.context))
-      .map((entry) => ({
-        entry,
-        words: (entry.msgStr.match(/[A-Za-z]+/g) ?? []).filter(
-          (word) => !allowed.has(word.toLowerCase()),
-        ),
-      }))
-      .filter(({ words }) => words.length > 0)
-      .map(({ entry, words }) => `${describeEntry(entry)} — латиница: ${words.join(', ')}`);
+      const offenders = entries
+        .filter(
+          (entry) =>
+            entry.context !== null &&
+            RU_LOCALE_METADATA_CONTEXTS.includes(entry.context),
+        )
+        .map((entry) => ({
+          entry,
+          words: (entry.msgStr.match(/[A-Za-z]+/g) ?? []).filter(
+            (word) => !allowed.has(word.toLowerCase()),
+          ),
+        }))
+        .filter(({ words }) => words.length > 0)
+        .map(
+          ({ entry, words }) =>
+            `${describeEntry(entry)} — латиница: ${words.join(', ')}`,
+        );
 
-    expect(offenders).toEqual([]);
-  });
+      expect(offenders).toEqual([]);
+    });
 
-  it('скомпилированный каталог содержит каждый перевод из .po', () => {
-    const messages = readCompiledMessages(compiled);
-    const missing = entries
-      .filter((entry) => entry.msgStr !== '')
-      .filter((entry) => findCompiledValue(messages, entry) === undefined)
-      .map(describeEntry);
+    it('скомпилированный каталог содержит каждый перевод из .po', () => {
+      const messages = readCompiledMessages(compiled);
+      const missing = entries
+        .filter((entry) => entry.msgStr !== '')
+        .filter((entry) => findCompiledValue(messages, entry) === undefined)
+        .map(describeEntry);
 
-    expect(missing).toEqual([]);
-  });
+      expect(missing).toEqual([]);
+    });
 
-  it('простые переводы в скомпилированном каталоге совпадают с .po', () => {
-    const messages = readCompiledMessages(compiled);
-    const stale = entries
-      // Только строки без ICU и без экранирования кавычкой: у них
-      // скомпилированная форма — ровно `[перевод]`, и расхождение означает
-      // «перевели в .po, но не пересобрали каталог».
-      .filter((entry) => entry.msgStr !== '' && !/[{#']/.test(entry.msgStr))
-      .filter(
-        (entry) =>
-          JSON.stringify(findCompiledValue(messages, entry)) !== JSON.stringify([entry.msgStr]),
-      )
-      .map(describeEntry);
+    it('простые переводы в скомпилированном каталоге совпадают с .po', () => {
+      const messages = readCompiledMessages(compiled);
+      const stale = entries
+        // Только строки без ICU и без экранирования кавычкой: у них
+        // скомпилированная форма — ровно `[перевод]`, и расхождение означает
+        // «перевели в .po, но не пересобрали каталог».
+        .filter((entry) => entry.msgStr !== '' && !/[{#']/.test(entry.msgStr))
+        .filter(
+          (entry) =>
+            JSON.stringify(findCompiledValue(messages, entry)) !==
+            JSON.stringify([entry.msgStr]),
+        )
+        .map(describeEntry);
 
-    expect(stale).toEqual([]);
-  });
-});
+      expect(stale).toEqual([]);
+    });
+  },
+);
