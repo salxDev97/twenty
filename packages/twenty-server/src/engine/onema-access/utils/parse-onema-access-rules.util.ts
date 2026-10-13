@@ -12,6 +12,7 @@ import {
 import {
   type OnemaAccessRules,
   type OnemaCondition,
+  type OnemaConditionValue,
   type OnemaTransitionRule,
 } from 'src/engine/onema-access/types/onema-access-rules.type';
 import { closesOnemaRuleCycle } from 'src/engine/onema-access/utils/closes-onema-rule-cycle.util';
@@ -144,7 +145,7 @@ const validateTransitionRules = (rules: OnemaAccessRules): void => {
   }
 
   for (const [objectName, { field, rules: edges }] of transitionsByObjectName) {
-    const seenFromValues = new Set<OnemaCondition['eq'][1]>();
+    const seenFromValues = new Set<OnemaConditionValue>();
 
     for (const edge of edges) {
       if (seenFromValues.has(edge.from)) {
@@ -179,7 +180,7 @@ const validateTransitionTargets = ({
   field: string;
   edge: OnemaTransitionRule;
 }): void => {
-  const seenTargetValues = new Set<OnemaCondition['eq'][1]>();
+  const seenTargetValues = new Set<OnemaConditionValue>();
 
   for (const target of edge.to) {
     const targetValue = readOnemaTransitionTargetValue(target);

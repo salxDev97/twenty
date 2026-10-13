@@ -15186,3 +15186,206 @@ msgstr "Your workspace has been updated with a new data model. Please refresh th
 #: src/engine/workspace-manager/workspace-cleaner/services/cleaner.workspace-service.ts
 msgid "Your workspace is paused — reactivate to keep your data"
 msgstr "Your workspace is paused — reactivate to keep your data"
+
+#. js-lingui-id: okfXhQ
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Archived at"
+msgstr "Archived at"
+
+#. js-lingui-id: 66wSGr
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Assigned chat threads"
+msgstr "Assigned chat threads"
+
+#. js-lingui-id: Z6TS/W
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Authored template URL"
+msgstr "Authored template URL"
+
+#. js-lingui-id: YIsqqp
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Cache Creation Tokens"
+msgstr "Cache Creation Tokens"
+
+#. js-lingui-id: Iwbkq0
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Cache Read Tokens"
+msgstr "Cache Read Tokens"
+
+#. js-lingui-id: sTkIAU
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Chat thread participations"
+msgstr "Chat thread participations"
+
+#. js-lingui-id: AmBiAv
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Error"
+msgstr "Error"
+
+#. js-lingui-id: Ca4seM
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Input Credits"
+msgstr "Input Credits"
+
+#. js-lingui-id: qUpYTQ
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Input Tokens"
+msgstr "Input Tokens"
+
+#. js-lingui-id: pPtB+n
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last activity"
+msgstr "Last activity"
+
+#. js-lingui-id: 6BLB1j
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last mentioned at"
+msgstr "Last mentioned at"
+
+#. js-lingui-id: XIwvdi
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last message sender"
+msgstr "Last message sender"
+
+#. js-lingui-id: 98c5Xs
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last message"
+msgstr "Last message"
+
+#. js-lingui-id: R2LOsP
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Last read at"
+msgstr "Last read at"
+
+#. js-lingui-id: yrTsg9
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Model ID"
+msgstr "Model ID"
+
+#. js-lingui-id: Vexcon
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Output Credits"
+msgstr "Output Credits"
+
+#. js-lingui-id: FjWz1Z
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Output Tokens"
+msgstr "Output Tokens"
+
+#. js-lingui-id: vTA2Ms
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Participants"
+msgstr "Participants"
+
+#. js-lingui-id: pvmev1
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Resolved destination URL"
+msgstr "Resolved destination URL"
+
+#. js-lingui-id: Q/HVbF
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Snoozed until"
+msgstr "Snoozed until"
+
+#. js-lingui-id: lnqIRm
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Subscribed"
+msgstr "Subscribed"
+
+#. js-lingui-id: nuuwhl
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Template and resolved URL hash"
+msgstr "Template and resolved URL hash"
+
+#. js-lingui-id: yxN9Xx
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "fieldMetadata.label"
+msgid "Writers"
+msgstr "Writers"
+
+#. js-lingui-id: dkKfLP
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelSingular"
+msgid "Chat thread participant"
+msgstr "Chat thread participant"
+
+#. js-lingui-id: iCLf0Y
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelPlural"
+msgid "Chat thread participants"
+msgstr "Chat thread participants"
+
+#. js-lingui-id: ApLkPY
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelSingular"
+msgid "Chat"
+msgstr "Chat"
+
+#. js-lingui-id: 68T2AN
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelPlural"
+msgid "Chats"
+msgstr "Chats"
+
+#. js-lingui-id: K9lEbt
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelSingular"
+msgid "Short link"
+msgstr "Short link"
+
+#. js-lingui-id: Cftw//
+#. ONE-107: строки нет в каталоге апстрима — метка собирается в коде без msg
+#: src/engine/workspace-manager/twenty-standard-application/utils/field-metadata/build-standard-target-flat-field-metadatas.util.ts
+msgctxt "objectMetadata.labelPlural"
+msgid "Short links"
+msgstr "Short links"
