@@ -1,6 +1,14 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
+// Правило запрещает считать идентификатор сообщения руками, чтобы резолверы
+// метаданных не разъехались между собой: их дело — звать
+// resolveEffectiveEntityProperty. Здесь не резолвер, а проверка самого
+// каталога: она сверяет, что скомпилированный `generated/ru-RU.ts` отвечает
+// тем же ключам, по которым его спросит ядро. Своя копия хеширования сделала
+// бы проверку бессмысленной — она обязана считать ровно то же, что и ядро,
+// поэтому берётся та же функция.
+// eslint-disable-next-line no-restricted-imports
 import { generateMessageId } from 'twenty-shared/i18n';
 
 import { parsePoCatalog, type PoEntry } from 'src/engine/core-modules/i18n/onema/parse-po-catalog.util';
