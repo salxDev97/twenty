@@ -58,7 +58,10 @@ const buildExecuteRaw = (
 
     return parentIds
       .filter((parentId) => parentId in statusByParentId)
-      .map((parentId) => ({ id: parentId, status: statusByParentId[parentId] }));
+      .map((parentId) => ({
+        id: parentId,
+        status: statusByParentId[parentId],
+      }));
   });
 
 const assertPermitted = ({

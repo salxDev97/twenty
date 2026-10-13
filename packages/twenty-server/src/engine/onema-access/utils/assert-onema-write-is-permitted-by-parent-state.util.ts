@@ -177,10 +177,7 @@ const assertParentFreezeRuleHolds = async ({
 
     for (const parentRow of lockedParentRows) {
       if (
-        isOnemaSameWrittenValue(
-          parentRow[parentFieldColumnName],
-          rule.equals,
-        )
+        isOnemaSameWrittenValue(parentRow[parentFieldColumnName], rule.equals)
       ) {
         throw onemaWriteDenied(
           `"${scope.tableShape.nameSingular}" cannot be written while its "${rule.object}.${rule.field}" is ${JSON.stringify(rule.equals)}`,
